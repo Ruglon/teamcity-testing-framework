@@ -1,0 +1,14 @@
+
+@host =
+@port = 8111
+@user =
+@password =
+
+GET http://{{user}}:{{password}}@1{{hist}}:{{port}}/app/rest/projects/
+Content-Type: application/json
+Accept: application/json
+
+###
+POST http://{{user}}:{{password}}@1{{hist}}:{{port}}/app/rest/projects/
+     Content-Type: application/json
+     Accept: application/json
