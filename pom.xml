@@ -14,6 +14,7 @@
         <testng.version>7.11.0</testng.version>
         <lombok.version>1.18.38</lombok.version>
         <rest-assured.version>5.5.5</rest-assured.version>
+        <allure.version>2.27.0</allure.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -36,7 +37,11 @@
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
         </dependency>
-
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-testng</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
 
 
 

@@ -1,4 +1,4 @@
-package teamcity.config;
+package teamcity.api.config;
 
 import java.io.IOException;
 import java.io.InputStream;

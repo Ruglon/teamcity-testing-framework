@@ -1,4 +1,4 @@
-package teamcity.spec;
+package teamcity.api.spec;
 
 import io.restassured.authentication.BasicAuthScheme;
 import io.restassured.builder.RequestSpecBuilder;
@@ -6,8 +6,8 @@ import io.restassured.filter.log.RequestLoggingFilter;
 import io.restassured.filter.log.ResponseLoggingFilter;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
-import teamcity.config.Config;
-import teamcity.models.User;
+import teamcity.api.config.Config;
+import teamcity.api.models.User;
 
 import java.util.List;
 
