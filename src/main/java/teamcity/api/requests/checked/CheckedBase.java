@@ -18,7 +18,7 @@ public class CheckedBase<T extends BaseModel> extends Request implements CrudInt
     }
 
     @Override
-    public Object create(BaseModel model) {
+    public T create(BaseModel model) {
         return (T) uncheckedBase
                 .create(model)
                 .then()
@@ -27,7 +27,7 @@ public class CheckedBase<T extends BaseModel> extends Request implements CrudInt
     }
 
     @Override
-    public Object read(String id) {
+    public T read(String id) {
         return (T) uncheckedBase
                 .read(id)
                 .then()
@@ -36,7 +36,7 @@ public class CheckedBase<T extends BaseModel> extends Request implements CrudInt
     }
 
     @Override
-    public Object update(String id, BaseModel model) {
+    public T update(String id, BaseModel model) {
         return (T) uncheckedBase
                 .update(id, model)
                 .then()
