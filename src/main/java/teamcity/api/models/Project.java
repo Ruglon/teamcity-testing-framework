@@ -14,7 +14,5 @@ public class Project extends BaseModel{
     private String id;
     @Random
     private String name;
-    @Builder.Default
-    private String locator = "_Root"; // если типичный "главный" проект
-    private Roles roles;
+    private String locator;
 }

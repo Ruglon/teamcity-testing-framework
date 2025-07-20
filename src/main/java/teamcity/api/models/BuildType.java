@@ -11,6 +11,7 @@ import teamcity.api.anotations.Random;
 @AllArgsConstructor
 @NoArgsConstructor
 public class BuildType extends BaseModel{
+    @Random
     private String id;
     @Random
     private String name;
