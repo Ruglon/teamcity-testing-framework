@@ -5,7 +5,6 @@ import org.hamcrest.Matchers;
 import org.testng.annotations.Test;
 import teamcity.api.models.BuildType;
 import teamcity.api.models.Project;
-import teamcity.api.models.User;
 import teamcity.api.requests.CheckedRequests;
 import teamcity.api.requests.unchecked.UncheckedBase;
 import teamcity.api.spec.Specifications;
@@ -22,39 +21,32 @@ public class BuildTypeTest extends BaseApiTest{
     
         @Test(description = "User should be able to create build type", groups = {"Positive", "CRUD"})
         public void userCreatesBuildTypeTest() {
-            var user = generate(User.class);
-            superUserCheckedRequests.getRequest(USERS).create(user);
-            var userCheckRequests = new CheckedRequests(Specifications.authSpec(user));
-            var project = generate(Project.class);
+            superUserCheckedRequests.getRequest(USERS).create(testData.getUser());
+            var userCheckRequests = new CheckedRequests(Specifications.authSpec(testData.getUser()));
 
-            project = userCheckRequests.<Project>getRequest(PROJECTS).create(project);
+            userCheckRequests.<Project>getRequest(PROJECTS).create(testData.getProject());
 
-            var buildType = generate(Arrays.asList(project), BuildType.class);
-            userCheckRequests.getRequest(BUILD_TYPES).create(buildType);
+            userCheckRequests.getRequest(BUILD_TYPES).create(testData.getBuildType());
 
-            var createdBuildType = userCheckRequests.<BuildType>getRequest(BUILD_TYPES).read(buildType.getId());
-            softy.assertEquals(buildType.getName(), createdBuildType.getName(), "Build type name is not correct");
+            var createdBuildType = userCheckRequests.<BuildType>getRequest(BUILD_TYPES).read(testData.getBuildType().getId());
+            softy.assertEquals(testData.getBuildType().getName(), createdBuildType.getName(), "Build type name is not correct");
 }
 
         @Test(description = "User should not be able to create two build types with the same id", groups = {"Negative", "CRUD"})
         public void userCreatesTwoBuildTypesWithTheSameIdTest() {
-            var user = generate(User.class);
-            superUserCheckedRequests.getRequest(USERS).create(user);
-            var userCheckRequests = new CheckedRequests(Specifications.authSpec(user));
-            var project = generate(Project.class);
+            var buildTypeWithSameId = generate(Arrays.asList(testData.getProject()), BuildType.class, testData.getBuildType().getId());
 
-            project = userCheckRequests.<Project>getRequest(PROJECTS).create(project);
+            superUserCheckedRequests.getRequest(USERS).create(testData.getUser());
 
-            var buildType1 = generate(Arrays.asList(project), BuildType.class);
-            var buildType2 = generate(Arrays.asList(project), BuildType.class, buildType1.getId());
+            var userCheckRequests = new CheckedRequests(Specifications.authSpec(testData.getUser()));
 
-            userCheckRequests.getRequest(BUILD_TYPES).create(buildType1);
+            userCheckRequests.<Project>getRequest(PROJECTS).create(testData.getProject());
 
-            new UncheckedBase(Specifications.authSpec(user), BUILD_TYPES)
-                    .create(buildType2)
-                    .then()
-                    .assertThat().statusCode(HttpStatus.SC_BAD_REQUEST)
-                    .body(Matchers.containsString("The build configuration / template ID \"%s\" is already used by another configuration or template".formatted(buildType1.getId())));
+            userCheckRequests.getRequest(BUILD_TYPES).create(testData.getBuildType());
+            new UncheckedBase(Specifications.authSpec(testData.getUser()), BUILD_TYPES)
+                    .create(buildTypeWithSameId)
+                    .then().assertThat().statusCode(HttpStatus.SC_BAD_REQUEST)
+                    .body(Matchers.containsString("The build configuration / template ID \"%s\" is already used by another configuration or template".formatted(testData.getBuildType().getId())));
         }
 
         @Test(description = "Project admin should be able to create build type for their project", groups = {"Positive", "Roles"})
