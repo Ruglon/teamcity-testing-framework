@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import teamcity.api.anotations.Parameterizable;
 import teamcity.api.anotations.Random;
 
 @Builder
@@ -12,6 +13,7 @@ import teamcity.api.anotations.Random;
 @NoArgsConstructor
 public class BuildType extends BaseModel{
     @Random
+    @Parameterizable
     private String id;
     @Random
     private String name;
