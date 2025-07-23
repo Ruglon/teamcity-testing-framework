@@ -5,18 +5,19 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import teamcity.api.anotations.Parameterizable;
 import teamcity.api.anotations.Random;
 
 @Builder
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class User extends BaseModel {
+public class Build extends BaseModel {
+    @Random
+    @Parameterizable
     private String id;
-    @Random
-    private String username;
-    @Random
-    private String password;
-    private Roles roles;
+    private String state;
+    private String status;
+    private BuildType buildType;
 }
