@@ -20,4 +20,6 @@ public class Build extends BaseModel {
     private String state;
     private String status;
     private BuildType buildType;
+    private Boolean personal;
+    private Comment comment;
 }

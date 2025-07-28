@@ -1,5 +1,7 @@
 package teamcity.api.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,6 +13,7 @@ import teamcity.api.anotations.Random;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class BuildType extends BaseModel{
     @Random
     @Parameterizable
@@ -19,5 +22,6 @@ public class BuildType extends BaseModel{
     private String name;
     private Project project;
     private Steps steps;
-
+    @JsonProperty("artifactRules")
+    private ArtifactRules artifactRules;
 }
