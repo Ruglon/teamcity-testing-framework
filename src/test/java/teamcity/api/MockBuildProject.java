@@ -1,6 +1,5 @@
 package teamcity.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.qameta.allure.Feature;
 import lombok.SneakyThrows;
 import org.apache.hc.core5.http.HttpStatus;
@@ -12,16 +11,13 @@ import teamcity.api.requests.checked.CheckedBase;
 import teamcity.api.spec.Specifications;
 import teamcity.common.WireMock;
 
-import java.util.List;
-import java.util.Map;
-
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static teamcity.api.enums.Endpoint.BUILD_QUEUE;
 import static teamcity.api.generators.TestDataGenerator.generate;
 
 @Feature("Start build")
-public class StartBuildTest extends BaseApiTest {
+public class MockBuildProject extends BaseApiTest {
     @BeforeMethod
     public void setupWireMockServer() {
         Project project = generate(Project.class);
