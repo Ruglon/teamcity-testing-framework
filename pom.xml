@@ -18,7 +18,7 @@
         <wiremock.version>3.13.1</wiremock.version>
         <assertj.version>3.25.3</assertj.version>
         <awaitility.version>4.3.0</awaitility.version>
-        <selenide.version>7.5.0</selenide.version>
+        <selenide.version>7.9.4</selenide.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -83,7 +83,6 @@
             <groupId>com.codeborne</groupId>
             <artifactId>selenide</artifactId>
             <version>${selenide.version}</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>
