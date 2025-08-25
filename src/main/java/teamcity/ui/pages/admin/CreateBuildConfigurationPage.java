@@ -15,9 +15,6 @@ public class CreateBuildConfigurationPage  extends CreateBasePage {
     private SelenideElement userNameBuildConfig = $(By.xpath("//input[@id='username']"));
     private SelenideElement passwordBuildConfig = $(By.xpath("//input[@id='password']"));
 
-    //div[contains(@class, 'connectionSuccessful') and contains(text(), 'VCS repository has been verified')]
-    //div[contains(@class, 'connectionSuccessful') and contains(., 'VCS repository has been verified')]
-    //div[contains(@class, 'Subprojects')]//span[text()='%s']
 
     public static CreateBuildConfigurationPage getCurrentPage() {
         return page(CreateBuildConfigurationPage.class);

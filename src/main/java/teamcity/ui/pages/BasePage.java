@@ -1,7 +1,6 @@
 package teamcity.ui.pages;
 
 import com.codeborne.selenide.ElementsCollection;
-import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.SelenideElement;
 import teamcity.ui.elements.BasePageElement;
 
@@ -24,11 +23,5 @@ public class BasePage {
     protected static <T> T getPage(Class<T> pageClass) {
         return page(pageClass);
     }
-
-    // ElementCollection: Selenide Element 1, Selenide Element 2 и тд
-    // collection.stream() -> Конвеер: Selenide Element 1, Selenide Element 2 и тд
-    // creator(Selenide Element 1) -> T -> add to list
-    // creator(Selenide Element 2) -> T -> add to list
-
 
 }

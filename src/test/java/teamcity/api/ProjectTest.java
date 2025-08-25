@@ -1,14 +1,9 @@
 package teamcity.api;
 
-import io.restassured.RestAssured;
-import io.restassured.http.ContentType;
-import io.restassured.path.json.JsonPath;
-import io.restassured.path.xml.XmlPath;
 import org.apache.http.HttpStatus;
 import org.hamcrest.Matchers;
 import org.testng.annotations.Test;
 import teamcity.api.models.*;
-import teamcity.api.requests.CheckedRequests;
 import teamcity.api.requests.unchecked.UncheckedBase;
 import teamcity.api.spec.Specifications;
 
@@ -18,7 +13,6 @@ import java.util.Map;
 
 import static io.qameta.allure.Allure.step;
 import static io.restassured.RestAssured.given;
-import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static org.awaitility.Awaitility.await;
 import static teamcity.api.enums.Endpoint.*;
 import static teamcity.api.generators.TestDataGenerator.generate;
