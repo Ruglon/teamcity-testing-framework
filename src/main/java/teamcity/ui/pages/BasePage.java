@@ -1,12 +1,15 @@
 package teamcity.ui.pages;
 
 import com.codeborne.selenide.ElementsCollection;
+import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.SelenideElement;
 import teamcity.ui.elements.BasePageElement;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Function;
+
+import static com.codeborne.selenide.Selenide.page;
 
 public class BasePage {
 
@@ -16,6 +19,10 @@ public class BasePage {
             ElementsCollection collection, Function<SelenideElement, T> creator)
     {
         return collection.stream().map(creator).toList();
+    }
+
+    protected static <T> T getPage(Class<T> pageClass) {
+        return page(pageClass);
     }
 
     // ElementCollection: Selenide Element 1, Selenide Element 2 и тд

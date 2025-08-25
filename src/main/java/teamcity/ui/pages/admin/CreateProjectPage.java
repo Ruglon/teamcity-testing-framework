@@ -2,10 +2,8 @@ package teamcity.ui.pages.admin;
 
 import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.SelenideElement;
-import teamcity.ui.pages.ProjectsPage;
 
 import static com.codeborne.selenide.Selenide.$;
-import static com.codeborne.selenide.Selenide.page;
 
 public class CreateProjectPage extends CreateBasePage{
 

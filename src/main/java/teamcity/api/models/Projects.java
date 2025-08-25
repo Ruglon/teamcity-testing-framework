@@ -10,11 +10,7 @@ import teamcity.api.anotations.Random;
 @AllArgsConstructor
 @NoArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Project extends BaseModel{
+public class Projects extends BaseModel {
     @Random
     private String id;
-    @Random
-    private String name;
-    private String locator;
-    private Integer count;
 }

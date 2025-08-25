@@ -20,8 +20,9 @@ public class BaseUiTest extends BaseTest {
         Configuration.baseUrl = "http://" + Config.getProperty("host");
         // НЕТ ПИШИТЕ UI ТЕСТЫ С ЛОКАЛЬНЫМ БРАУЗЕРОМ
         // А ПОТОМ ЗАПУСКАЕТЕ НА REMOTE BROWSER
-        Configuration.remote = Config.getProperty("remote");
-        Configuration.browserSize = Config.getProperty("browserSize");
+        Configuration.baseUrl = Boolean.parseBoolean(Config.getProperty("remote"))
+                ? "http://host.docker.internal:8111"  // Для Windows/Mac; для Linux — "http://172.17.0.1:8111"
+                : "http://localhost:8111";  // Local        Configuration.browserSize = Config.getProperty("browserSize");
 
         Configuration.browserCapabilities.setCapability("selenoid:options", Map.of("enableVNC", true, "enableLog", true));
     }

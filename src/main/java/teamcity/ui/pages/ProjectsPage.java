@@ -4,6 +4,7 @@ import com.codeborne.selenide.Condition;
 import com.codeborne.selenide.ElementsCollection;
 import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.SelenideElement;
+import org.openqa.selenium.By;
 import teamcity.ui.elements.ProjectElement;
 
 import java.util.List;
@@ -19,7 +20,8 @@ public class ProjectsPage extends BasePage{
 
     private SelenideElement spanFavoriteProjects = $("span[class='ProjectPageHeader__title--ih']");
 
-    private SelenideElement header = $(".MainPanel__router--gF > div");
+    private SelenideElement header = $(By.xpath("//div[contains(@class, 'MainPanel')]"));
+    private static SelenideElement validationMessage = $(By.xpath("//span[contains(text(), 'Project name must not be empty')]"));
 
     // ElementCollection -> List<ProjectElement>
     // UI elements -> List<Object>
@@ -35,6 +37,10 @@ public class ProjectsPage extends BasePage{
 
     public List<ProjectElement> getProjects() {
         return generatePageElements(projectElements, ProjectElement::new);
+    }
+
+    public static void validateErrorMessage(){
+        validationMessage.shouldBe(Condition.visible, BASE_WAITING);
     }
 
 }
