@@ -3,6 +3,7 @@ package teamcity.api.requests.checked;
 import io.restassured.specification.RequestSpecification;
 import org.apache.http.HttpStatus;
 import teamcity.api.enums.Endpoint;
+import teamcity.api.generators.TestDataStorage;
 import teamcity.api.models.BaseModel;
 import teamcity.api.requests.CrudInterface;
 import teamcity.api.requests.Request;
@@ -19,11 +20,14 @@ public class CheckedBase<T extends BaseModel> extends Request implements CrudInt
 
     @Override
     public T create(BaseModel model) {
-        return (T) uncheckedBase
+        var createdModel = (T) uncheckedBase
                 .create(model)
                 .then()
                 .assertThat().statusCode(HttpStatus.SC_OK)
                 .extract().as(endpoint.getModelClass());
+
+        TestDataStorage.getStorage().addCreatedEntity(endpoint, createdModel);
+        return createdModel;
     }
 
     @Override

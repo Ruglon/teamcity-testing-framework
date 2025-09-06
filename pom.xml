@@ -16,6 +16,9 @@
         <rest-assured.version>5.5.5</rest-assured.version>
         <allure.version>2.27.0</allure.version>
         <jackson.version>2.17.2</jackson.version>
+        <wiremock.version>3.13.1</wiremock.version>
+        <assertj.version>3.25.3</assertj.version>
+        <awaitility.version>4.3.0</awaitility.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -25,6 +28,26 @@
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>
             <version>${testng.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version> <!-- Последняя версия на июль 2025 -->
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>${awaitility.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock</artifactId>
+            <version>${wiremock.version}</version>
             <scope>test</scope>
         </dependency>
 

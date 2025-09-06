@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 @Builder
 @Data
 @AllArgsConstructor
@@ -17,4 +19,7 @@ public class Step extends BaseModel{
     private String name;
     @Builder.Default
     private String type = "simpleRunner";
+
+    private Map<String, String> parameters;
+
 }

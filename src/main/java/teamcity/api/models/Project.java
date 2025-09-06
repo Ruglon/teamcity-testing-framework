@@ -11,8 +11,22 @@ import teamcity.api.anotations.Random;
 @NoArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Project extends BaseModel{
+    @Random
     private String id;
     @Random
     private String name;
-    private String locator;
+    private ProjectLocator  parentProject;
+    private ProjectLocator  sourceProject;
+
+    @Builder.Default
+    private boolean copyAllAssociatedSettings = true;
+
+    @Builder
+    @Getter
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class ProjectLocator {
+        private String locator;
+    }
 }
