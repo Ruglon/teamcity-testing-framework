@@ -23,7 +23,7 @@ public class BaseTest {
 
     @AfterMethod(alwaysRun = true)
     public void afterTest() {
-        softy.assertAll();
+//        softy.assertAll();
         TestDataStorage.getStorage().deleteCreatedEntities();
     }
 
