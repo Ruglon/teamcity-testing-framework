@@ -1,17 +1,23 @@
-name: CI Pipeline with Swagger and Allure Reports
+name: Automation Workflow (Reusable)
 
 on:
+  workflow_call:
+    inputs:
+      package:
+        description: 'Package to run (e.g., api or ui)'
+        required: true
+        default: 'api'
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package to run (e.g., api)'
+        description: 'Package to run (e.g., api or ui)'
         required: true
         default: 'api'
 
 jobs:
   runSwaggerCoverage:
     runs-on: ubuntu-latest
-    if: ${{ inputs.package == 'api' }}
+    if: ${{ inputs.package == 'api' || inputs.package == 'ui' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,11 +31,21 @@ jobs:
       - name: Build with Maven
         run: mvn clean test  # Generates coverage data via SwaggerCoverageRestAssured
 
+      - name: Check Coverage Output
+        run: |
+          mkdir -p target/swagger-coverage-output
+          if [ ! "$(ls -A target/swagger-coverage-output)" ]; then
+            echo "No coverage data found, creating dummy file"
+            echo "{}" > target/swagger-coverage-output/coverage-results.json
+          fi
+
       - name: Run Swagger Coverage
         continue-on-error: true
         run: |
           chmod +x .swagger-coverage-commandline/bin/swagger-coverage
-          .swagger-coverage-commandline/bin/swagger-coverage -s "http://${{ env.HOST }}/app/rest/swagger.json" -i target/swagger-coverage-output
+          if [ "${{ inputs.package }}" = "api" ]; then
+            .swagger-coverage-commandline/bin/swagger-coverage -s "http://${{ env.HOST }}/app/rest/swagger.json" -i target/swagger-coverage-output
+          fi
         env:
           HOST: ${{ secrets.TEAMCITY_HOST }}
 
