@@ -3,7 +3,7 @@ name: TeamCity Deployment
 on:
   push:
     branches:
-      - main  # Trigger only on main branch, adjust as needed
+      - main
 
 jobs:
   # Собирается бекенд и деплоится на стейдж/review app
