@@ -2,8 +2,9 @@ name: TeamCity Deployment
 
 on:
   push:
-    branches:
-      - main
+    # Remove branches: - main or use branches: [ "*" ] to include all
+    # branches: - main  # Comment out or remove this line
+    branches: [ "*" ]  # Trigger on all branches
 
 jobs:
   # Собирается бекенд и деплоится на стейдж/review app
