@@ -7,12 +7,14 @@ on:
         description: 'Package to run (e.g., api or ui)'
         required: true
         default: 'api'
+        type: string
   workflow_dispatch:
     inputs:
       package:
         description: 'Package to run (e.g., api or ui)'
         required: true
         default: 'api'
+        type: string
 
 jobs:
   runSwaggerCoverage:
@@ -21,16 +23,13 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '11'  # Match your project’s Java version
+          java-version: '11' # Match your project’s Java version
           distribution: 'adopt'
-
       - name: Build with Maven
-        run: mvn clean test  # Generates coverage data via SwaggerCoverageRestAssured
-
+        run: mvn clean test # Generates coverage data via SwaggerCoverageRestAssured
       - name: Check Coverage Output
         run: |
           mkdir -p target/swagger-coverage-output
@@ -38,7 +37,6 @@ jobs:
             echo "No coverage data found, creating dummy file"
             echo "{}" > target/swagger-coverage-output/coverage-results.json
           fi
-
       - name: Run Swagger Coverage
         continue-on-error: true
         run: |
@@ -48,7 +46,6 @@ jobs:
           fi
         env:
           HOST: ${{ secrets.TEAMCITY_HOST }}
-
       - name: Save Swagger Coverage
         uses: actions/upload-artifact@v4
         if: ${{ inputs.package == 'api' }}
@@ -57,7 +54,6 @@ jobs:
           path: |
             target/swagger-coverage-output/swagger-coverage-report.html
             target/swagger-coverage-output/swagger-coverage-results.json
-
       - name: Load Test Report History
         uses: actions/checkout@v4
         if: always()
@@ -65,7 +61,6 @@ jobs:
         with:
           ref: gh-pages
           path: gh-pages
-
       - name: Build Test Report
         uses: simple-elf/allure-report-action@v1.7
         if: always()
@@ -74,11 +69,4 @@ jobs:
           allure_history: allure-history
           allure_results: target/allure-results
           subfolder: ${{ inputs.package }}
-
       - name: Publish Test Report
-        uses: peaceiris/actions-gh-pages@v3
-        if: always()
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: gh-pages/allure-history
