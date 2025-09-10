@@ -1,72 +1,44 @@
-name: Automation Workflow (Reusable)
+# Создаем репорт с покрытием API тестов, основанном на Swagger.
+# Документация: https://github.com/viclovsky/swagger-coverage
+# Обязательно добавить фильтр SwaggerCoverageRestAssured в RestAssured
+- name: Run Swagger Coverage
+  continue-on-error: true
+  if: ${{ inputs.package == 'api' }}
+  run: .swagger-coverage-commandline/bin/swagger-coverage-commandline -s http://$HOST:8111/app/rest/swagger.json -i target/swagger-coverage-output
 
-on:
-  workflow_call:
-    inputs:
-      package:
-        description: 'Package to run (e.g., api or ui)'
-        required: true
-        default: 'api'
-        type: string
-  workflow_dispatch:
-    inputs:
-      package:
-        description: 'Package to run (e.g., api or ui)'
-        required: true
-        default: 'api'
-        type: string
+# Сохраняем Swagger Report в артефакты GitHub Actions
+- name: Save Swagger Coverage
+  uses: actions/upload-artifact@v4
+  if: ${{ inputs.package == 'api' }}
+  with:
+    name: swagger-coverage
+    path: |
+      swagger-coverage-report.html
+      swagger-coverage-results.json
+      
+      # Загружаем историю Allure Report с специальной ветки gh-pages (https://allurereport.org/docs/integrations-github/)
+- name: Load test report history
+  uses: actions/checkout@v2
+  if: always()
+  continue-on-error: true
+  with:
+    ref: gh-pages
+    path: gh-pages
 
-jobs:
-  runSwaggerCoverage:
-    runs-on: ubuntu-latest
-    if: ${{ inputs.package == 'api' || inputs.package == 'ui' }}
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11' # Match your project’s Java version
-          distribution: 'adopt'
-      - name: Build with Maven
-        run: mvn clean test # Generates coverage data via SwaggerCoverageRestAssured
-      - name: Check Coverage Output
-        run: |
-          mkdir -p target/swagger-coverage-output
-          if [ ! "$(ls -A target/swagger-coverage-output)" ]; then
-            echo "No coverage data found, creating dummy file"
-            echo "{}" > target/swagger-coverage-output/coverage-results.json
-          fi
-      - name: Run Swagger Coverage
-        continue-on-error: true
-        run: |
-          chmod +x .swagger-coverage-commandline/bin/swagger-coverage
-          if [ "${{ inputs.package }}" = "api" ]; then
-            .swagger-coverage-commandline/bin/swagger-coverage -s "http://${{ env.HOST }}/app/rest/swagger.json" -i target/swagger-coverage-output
-          fi
-        env:
-          HOST: ${{ secrets.TEAMCITY_HOST }}
-      - name: Save Swagger Coverage
-        uses: actions/upload-artifact@v4
-        if: ${{ inputs.package == 'api' }}
-        with:
-          name: swagger-coverage
-          path: |
-            target/swagger-coverage-output/swagger-coverage-report.html
-            target/swagger-coverage-output/swagger-coverage-results.json
-      - name: Load Test Report History
-        uses: actions/checkout@v4
-        if: always()
-        continue-on-error: true
-        with:
-          ref: gh-pages
-          path: gh-pages
-      - name: Build Test Report
-        uses: simple-elf/allure-report-action@v1.7
-        if: always()
-        with:
-          gh_pages: gh-pages
-          allure_history: allure-history
-          allure_results: target/allure-results
-          subfolder: ${{ inputs.package }}
-      - name: Publish Test Report
+- name: Build test report
+  uses: simple-elf/allure-report-action@v1.7
+  if: always()
+  with:
+    gh_pages: gh-pages
+    allure_history: allure-history
+    allure_results: target/allure-results
+    subfolder: ${{ inputs.package }}
+
+# Создаем пустую ветку gh-pages на основе инструкции https://gist.github.com/ramnathv/2227408
+- name: Publish test report
+  uses: peaceiris/actions-gh-pages@v3
+  if: always()
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    publish_branch: gh-pages
+    publish_dir: allure-history
