@@ -1,28 +1,21 @@
 name: TeamCity Deployment
-
 on:
   push:
-    # Remove branches: - main or use branches: [ "*" ] to include all
-    # branches: - main  # Comment out or remove this line
-    branches: [ "*" ]  # Trigger on all branches
+    branches: [ "*" ]
+
+permissions:
+  contents: write
 
 jobs:
-  # Собирается бекенд и деплоится на стейдж/review app
   backend:
     uses: ./.github/workflows/backend-stage.yml
-
-  # Собирается фронтенд и деплоится на стейдж/review app
   frontend:
     uses: ./.github/workflows/frontend-stage.yml
-
-  # Прогоняются API тесты
   automation-api:
     needs: [backend, frontend]
     uses: ./.github/workflows/automation.yml
     with:
       package: api
-
-  # Прогоняются UI тесты
   automation-ui:
     needs: [backend, frontend]
     uses: ./.github/workflows/automation.yml
