@@ -11,7 +11,7 @@ jobs:
         run: echo Собирается билд бекенда (прогоняются юнит тетсы при сборке), формируется и публикуется Docker образ
 
   deploy-stage:
-    needs: build
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Deploy backend to stage/review app
