@@ -21,31 +21,25 @@ jobs:
     permissions:
       contents: write
 
-    # Start local TeamCity as a service container
     services:
       teamcity:
         image: jetbrains/teamcity-server:2025.07.1
         ports: [ "8111:8111" ]
         env:
           TEAMCITY_SERVER_OPTS: "-Djava.security.manager=allow"
-        # healthcheck proves container is up; we also do an extra HTTP wait below for the app
-        options: >-
-          --health-cmd="curl -fsS http://localhost:8111 || exit 1"
-          --health-interval=10s --health-timeout=5s --health-retries=90
-        volumes:
-          - ${{ runner.temp }}/tc_data:/data/teamcity_server/datadir
-          - ${{ runner.temp }}/tc_logs:/data/teamcity/logs
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Start Selenoid on runner (drop-in Selenium-compatible grid at :4444)
-      - name: Start Selenoid (Chrome+Firefox)
+      # --- Pick ONE of the two blocks below ---
+
+      # A) Start Selenoid (Selenium-compatible grid at :4444)
+      - name: Start Selenoid
         uses: Xotabu4/selenoid-github-action@v2
 
-      # If you prefer Selenium Standalone instead of Selenoid, comment step above and use:
-      # - name: Start Selenium Grid (Standalone Chrome)
+      # B) (Alternative) Selenium Standalone (comment A if you use B)
+      # - name: Start Selenium Standalone (Chrome)
       #   run: |
       #     docker run -d --rm --name grid -p 4444:4444 --shm-size=2g selenium/standalone-chrome:4.35.0-20250828
       #     for i in {1..120}; do
@@ -77,41 +71,28 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: (Optional) Wait for Selenoid /status
-        run: |
-          for i in {1..120}; do
-            if curl -fsS http://localhost:4444/status >/dev/null; then
-              echo "Selenoid is responding"; break
-            fi
-            sleep 2
-          done
-
       - name: Build & Test with Maven
         env:
+          # Keep your old names, so your tests keep working:
+          HOST: localhost
+          SUPER_USER_TOKEN: ${{ steps.super.outputs.token }}
+          # Also pass explicit variables most frameworks expect:
           TEAMCITY_URL: http://localhost:8111
-          TEAMCITY_SUPER_USER_TOKEN: ${{ steps.super.outputs.token }}
           SELENOID_URL: http://localhost:4444/wd/hub
           PACKAGE: ${{ inputs.package }}
         run: |
           echo "Package=${PACKAGE}"
-          # If your tests read these system props, pass them through:
-          mvn -B -Dtc.url="${TEAMCITY_URL}" -Dtc.super="${TEAMCITY_SUPER_USER_TOKEN}" -Dselenium.remote="${SELENOID_URL}" clean test
+          mvn -B -Dtc.url="${TEAMCITY_URL}" -Dtc.super="${SUPER_USER_TOKEN}" -Dselenium.remote="${SELENOID_URL}" clean test
 
-      # ---- Swagger coverage (API only) ----
+      # --- Swagger coverage (API only) ---
       - name: Ensure coverage dir exists
         if: ${{ inputs.package == 'api' }}
         run: |
           mkdir -p target/swagger-coverage-output
-          if [ ! "$(ls -A target/swagger-coverage-output)" ]; then
+          # create the *same* filename you later upload
+          if [ ! -e target/swagger-coverage-output/swagger-coverage-results.json ]; then
             echo "{}" > target/swagger-coverage-output/swagger-coverage-results.json
           fi
-
-      - name: Install swagger-coverage CLI
-        if: ${{ inputs.package == 'api' }}
-        run: |
-          curl -fsSL -o sc.zip https://github.com/serenity-bdd/swagger-coverage-commandline/releases/latest/download/swagger-coverage-commandline.zip || true
-          unzip -o sc.zip -d . || true
-          chmod +x .swagger-coverage-commandline/bin/swagger-coverage || true
 
       - name: Run Swagger Coverage
         if: ${{ inputs.package == 'api' }}
@@ -124,7 +105,7 @@ jobs:
               -s "${TEAMCITY_URL}/app/rest/swagger.json" \
               -i target/swagger-coverage-output || true
           else
-            echo "swagger-coverage CLI not found; skipping"
+            echo "swagger-coverage CLI not found; skipping (install it or check it in)"
           fi
 
       - name: Save Swagger Coverage
@@ -135,7 +116,7 @@ jobs:
           path: target/swagger-coverage-output/**
           if-no-files-found: warn
 
-      # ---- Allure (always try to build) ----
+      # --- Allure (always try to build) ---
       - name: Load Test Report History
         if: always()
         uses: actions/checkout@v4
