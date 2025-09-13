@@ -14,14 +14,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Make mvnw runnable on Linux runners (handles both CRLF and missing +x)
+      - name: Normalize Maven Wrapper
+        run: |
+          if [ ! -f mvnw ]; then
+            echo "mvnw not found at repo root"; exit 1
+          fi
+          sed -i 's/\r$//' mvnw || true
+          chmod +x mvnw || true
+          ./mvnw -v
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'zulu'
+          cache: maven
 
       - name: Validate Checkstyle
-        run: ./mvnw validate
+        run: ./mvnw -B validate
 
   run-tests:
     needs: validate-checkstyle
@@ -29,10 +40,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same normalization here too
+      - name: Normalize Maven Wrapper
+        run: |
+          if [ ! -f mvnw ]; then
+            echo "mvnw not found at repo root"; exit 1
+          fi
+          sed -i 's/\r$//' mvnw || true
+          chmod +x mvnw || true
+          ./mvnw -v
+
       - name: TeamCity Setup
         uses: ./.github/actions/teamcity-setup
 
       - name: Run tests
+        # keep or remove continue-on-error as you prefer
         continue-on-error: true
-        # Указываем группу, чтобы не запустить тесты, связанные с сетапом TeamCity
-        run: ./mvnw test -Dtest='com.example.teamcity.${{ inputs.package }}.**' -Dgroups=Regression
+        run: ./mvnw -B test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
