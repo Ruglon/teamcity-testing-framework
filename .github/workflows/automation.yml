@@ -21,24 +21,25 @@ jobs:
           distribution: 'zulu'
           cache: maven
 
-      # Use wrapper if complete; else install Maven
+      # Pick Maven wrapper if complete; else install Maven
       - name: Choose Maven (wrapper or system)
-        id: mvn
         run: |
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
             sed -i 's/\r$//' mvnw || true
             chmod +x mvnw || true
-            echo "cmd=./mvnw" >> "$GITHUB_OUTPUT"
+            CMD=./mvnw
           else
             echo "Maven Wrapper missing/incomplete. Installing Maven..."
             sudo apt-get update
             sudo apt-get install -y maven
-            echo "cmd=mvn" >> "$GITHUB_OUTPUT"
+            CMD=mvn
           fi
-          ${{ steps.mvn.outputs.cmd }} -v
+          echo "MVN_CMD=$CMD" >> "$GITHUB_ENV"
+          $CMD -v
+          java -version
 
       - name: Validate Checkstyle (show violations)
-        run: ${{ steps.mvn.outputs.cmd }} -B -V -e -Dcheckstyle.consoleOutput=true validate
+        run: ${{ env.MVN_CMD }} -B -V -e -Dcheckstyle.consoleOutput=true validate
 
       - name: Upload Checkstyle report (always)
         if: always()
@@ -55,6 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
@@ -62,28 +64,26 @@ jobs:
           distribution: 'zulu'
           cache: maven
 
+      # Repeat chooser in this job (env doesn’t persist across jobs)
       - name: Choose Maven (wrapper or system)
-        id: mvn
         run: |
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
             sed -i 's/\r$//' mvnw || true
             chmod +x mvnw || true
-            echo "cmd=./mvnw" >> "$GITHUB_OUTPUT"
+            CMD=./mvnw
           else
             echo "Maven Wrapper missing/incomplete. Installing Maven..."
             sudo apt-get update
             sudo apt-get install -y maven
-            echo "cmd=mvn" >> "$GITHUB_OUTPUT"
+            CMD=mvn
           fi
-          ${{ steps.mvn.outputs.cmd }} -v
+          echo "MVN_CMD=$CMD" >> "$GITHUB_ENV"
+          $CMD -v
+          java -version
 
       - name: TeamCity Setup
         uses: ./.github/actions/teamcity-setup
 
       - name: Run tests
         continue-on-error: true
-        run: |
-          # primary selector
-          ${{ steps.mvn.outputs.cmd }} -B test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
-          # fallback (uncomment if your packages differ): 
-          # ${{ steps.mvn.outputs.cmd }} -B test -Dgroups=Regression -Dincludes=**/${{ inputs.package }}/**/*Test.java
+        run: ${{ env.MVN_CMD }} -B test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
