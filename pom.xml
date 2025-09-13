@@ -13,6 +13,17 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
                 <version>3.6.0</version>
+                <configuration>
+                    <!-- point to your rules -->
+                    <configLocation>config/checkstyle/checkstyle.xml</configLocation>
+                    <!-- show violations in console -->
+                    <consoleOutput>true</consoleOutput>
+                    <!-- fail build on violations; flip to false temporarily if you just want a report -->
+                    <failOnViolation>true</failOnViolation>
+                    <!-- optional: encoding and tool version -->
+                    <encoding>UTF-8</encoding>
+                    <linkXRef>false</linkXRef>
+                </configuration>
                 <executions>
                     <execution>
                         <id>validate</id>
@@ -20,17 +31,12 @@
                         <goals>
                             <goal>check</goal>
                         </goals>
-                        <configuration>
-                            <configLocation>checkstyle.xml</configLocation>
-                            <consoleOutput>true</consoleOutput>
-                            <failsOnError>true</failsOnError>
-                            <includeTestSourceDirectory>true</includeTestSourceDirectory>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
+
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -45,7 +51,6 @@
         <awaitility.version>4.3.0</awaitility.version>
         <selenide.version>7.9.4</selenide.version>
         <swagger-coverage-version>1.5.0</swagger-coverage-version>
-        <allure.version>2.27.0</allure.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -83,11 +88,6 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.qameta.allure</groupId>
-            <artifactId>allure-testng</artifactId>
-            <version>${allure.version}</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

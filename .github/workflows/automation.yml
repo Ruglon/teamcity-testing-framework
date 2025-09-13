@@ -14,14 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show repo root (sanity)
-        run: |
-          pwd
-          ls -la
-          if [ ! -f pom.xml ]; then
-            echo "No pom.xml at repo root. If your pom is in a subfolder, add -f <path>/pom.xml to the Maven calls."; exit 1
-          fi
-
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
@@ -29,44 +21,17 @@ jobs:
           distribution: 'zulu'
           cache: maven
 
-      # Use wrapper if complete; otherwise install Maven and use mvn
-      - name: Choose Maven (wrapper or system)
-        id: mvn
-        run: |
-          set -e
-          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true
-            chmod +x mvnw || true
-            echo "cmd=./mvnw" >> "$GITHUB_OUTPUT"
-          else
-            echo "Maven Wrapper missing/incomplete. Installing Maven via apt..."
-            sudo apt-get update
-            sudo apt-get install -y maven
-            echo "cmd=mvn" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Validate Checkstyle (show violations)
+        run: mvn -B -V -e -Dcheckstyle.consoleOutput=true validate
 
-      - name: Maven & Java info
-        run: |
-          echo "Using: ${{ steps.mvn.outputs.cmd }}"
-          ${{ steps.mvn.outputs.cmd }} -v
-          java -version
-
-      - name: Validate Checkstyle (loud)
-        run: |
-          # -B batch mode, -V show versions, -e show stack traces
-          ${{ steps.mvn.outputs.cmd }} -B -V -e validate
-        env:
-          MAVEN_OPTS: "-Xmx1024m"
-
-      - name: Upload Maven logs (always)
+      - name: Upload Checkstyle report (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: maven-logs-validate
+          name: checkstyle-report
           path: |
-            **/target/surefire-reports/*
-            **/target/logs/*
             **/target/checkstyle-result.xml
+            **/target/checkstyle-cachefile
           if-no-files-found: ignore
 
   run-tests:
@@ -74,45 +39,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'zulu'
           cache: maven
-
-      - name: Choose Maven (wrapper or system)
-        id: mvn
-        run: |
-          set -e
-          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true
-            chmod +x mvnw || true
-            echo "cmd=./mvnw" >> "$GITHUB_OUTPUT"
-          else
-            echo "Maven Wrapper missing/incomplete. Installing Maven via apt..."
-            sudo apt-get update
-            sudo apt-get install -y maven
-            echo "cmd=mvn" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: TeamCity Setup
         uses: ./.github/actions/teamcity-setup
-
       - name: Run tests
         continue-on-error: true
-        run: ${{ steps.mvn.outputs.cmd }} -B -e test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
-        env:
-          MAVEN_OPTS: "-Xmx1024m"
-
-      - name: Upload Maven logs (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: maven-logs-tests
-          path: |
-            **/target/surefire-reports/*
-            **/target/logs/*
-            **/target/allure-results/*
-          if-no-files-found: ignore
+        run: mvn -B test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
