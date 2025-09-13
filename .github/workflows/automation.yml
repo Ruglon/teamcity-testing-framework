@@ -65,40 +65,61 @@ jobs:
             echo "Waiting for TeamCity container id..."; sleep 2
           done
           if [ -z "$TC_CID" ]; then
-            echo "Could not find TeamCity container. Dumping docker ps:"
-            docker ps -a
+            echo "Could not find TeamCity container. Dumping docker ps:"; docker ps -a
             exit 1
           fi
 
-      - name: Extract Super User token (with retry) and complete first-run
+      - name: Extract Super User token (robust) and complete first-run
         run: |
-          for i in {1..120}; do
-            TOKEN=$(docker exec "${TC_CID}" sh -lc \
-              "grep -a 'Super user authentication token' /opt/teamcity/logs/teamcity-server.log | tail -1 | awk -F': ' '{print \$NF}' | tr -d ' '") || true
-            if [ -n "$TOKEN" ]; then echo "Got token"; break; fi
+          # Helper that prints a token if present in any source
+          get_token () {
+            docker exec "${TC_CID}" sh -lc '
+              sed -nE "s/.*[Ss]uper user authentication token: *\"?([0-9]+)\"?.*/\1/p" \
+                /opt/teamcity/logs/teamcity-server.log \
+                /opt/teamcity/logs/teamcity-startup.log 2>/dev/null | tail -n1
+            '
+          }
+
+          # Try up to ~10 minutes (TeamCity may be slow on first boot)
+          TOKEN=""
+          for i in {1..300}; do
+            TOKEN="$(get_token || true)"
+            if [ -z "$TOKEN" ]; then
+              # also scan the live console output as a fallback
+              TOKEN=$(docker logs "${TC_CID}" --since 30s 2>&1 \
+                | sed -nE 's/.*[Ss]uper user authentication token: *"?([0-9]+)"?.*/\1/p' | tail -n1)
+            fi
+            if [ -n "$TOKEN" ]; then
+              echo "Got token: ${#TOKEN} digits"
+              break
+            fi
             echo "Waiting for token in logs..."; sleep 2
           done
+
           if [ -z "$TOKEN" ]; then
-            echo "Could not find Super User token. Last 200 lines:"
+            echo "Could not find Super User token. Showing current startup state lines:"
+            docker exec "${TC_CID}" sh -lc "grep -a 'Current stage:' -n /opt/teamcity/logs/teamcity-server.log | tail -n 10 || true"
+            echo "--- last 200 lines of teamcity-startup.log ---"
+            docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-startup.log || true"
+            echo "--- last 200 lines of teamcity-server.log ---"
             docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
             exit 1
           fi
+
           echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          # Headless first-run completion (harmless if already done)
+          # Finish first-run (JetBrains’ documented flow: POST token to /mnt/do/authenticate)
           curl -fsS -X POST "http://localhost:8111/mnt/do/authenticate?token=$TOKEN" || true
 
       - name: Wait for TeamCity READY
         run: |
           for i in {1..300}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
-            if [ "$code" = "200" ]; then
-              echo "Ready = 200"; break
-            fi
+            if [ "$code" = "200" ]; then echo "Ready = 200"; break; fi
             echo "Waiting (ready: $code)..."; sleep 2
           done
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
           if [ "$code" != "200" ]; then
-            echo "TeamCity never reached READY. Dumping recent logs:"
+            echo "TeamCity never reached READY. Recent logs:"
             docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
             exit 1
           fi
