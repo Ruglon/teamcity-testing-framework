@@ -15,7 +15,7 @@
                 <version>3.6.0</version>
                 <configuration>
                     <!-- Resolved from the repo root on any module/OS -->
-                    <configLocation>${maven.multiModuleProjectDirectory}/config/checkstyle/checkstyle.xml</configLocation>
+                    <configLocation>checkstyle/checkstyle.xml</configLocation>
                     <consoleOutput>true</consoleOutput>
                     <failOnViolation>true</failOnViolation>
                 </configuration>

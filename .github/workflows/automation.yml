@@ -37,6 +37,17 @@ jobs:
           echo "MVN_CMD=$CMD" >> "$GITHUB_ENV"
           $CMD -v
           java -version
+          
+      - name: Verify Checkstyle config exists
+        run: |
+          set -e
+          echo "PWD=$(pwd)"
+          ls -la config || true
+          ls -la config/checkstyle || true
+          test -f config/checkstyle/checkstyle.xml || {
+            echo "::error::Missing config/checkstyle/checkstyle.xml at repo root"; exit 1;
+          }
+
 
       - name: Validate Checkstyle (show violations)
         run: ${{ env.MVN_CMD }} -B -V -e -Dcheckstyle.consoleOutput=true validate
