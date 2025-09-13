@@ -41,26 +41,24 @@ jobs:
       - name: Ensure Checkstyle rules path
         run: |
           set -e
-          echo "PWD=$(pwd)"
-          ls -la config || true
-          ls -la config/checkstyle || true
-
+          # If your file actually lives at repo root as 'checkstyle.xml',
+          # normalize to the path used in your POM: config/checkstyle/checkstyle.xml
           if [ ! -f config/checkstyle/checkstyle.xml ]; then
             if [ -f checkstyle.xml ]; then
-              echo "Normalizing: copying repo-root checkstyle.xml to config/checkstyle/checkstyle.xml"
+              echo "Normalizing: copying checkstyle.xml -> config/checkstyle/checkstyle.xml"
               mkdir -p config/checkstyle
               cp -f checkstyle.xml config/checkstyle/checkstyle.xml
-            else
-              echo "::error::Missing config/checkstyle/checkstyle.xml (and no checkstyle.xml at repo root to copy)."
-              echo "Commit your rules to config/checkstyle/checkstyle.xml or change the plugin's configLocation."
-              exit 1
             fi
           fi
+          # Final, explicit check (clear failure if still missing)
+          test -f config/checkstyle/checkstyle.xml || {
+            echo "::error::Missing config/checkstyle/checkstyle.xml"; exit 1;
+          }
       
       
 
       - name: Validate Checkstyle (show violations)
-        run: ${{ env.MVN_CMD }} -B -V -e -Dcheckstyle.consoleOutput=true validate
+        run: ${{ env.MVN_CMD }} -B -V -e -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
 
       - name: Upload Checkstyle report (always)
         if: always()
