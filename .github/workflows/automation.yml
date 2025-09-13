@@ -69,45 +69,50 @@ jobs:
             exit 1
           fi
 
+      # --- FORCE TOKEN EMISSION (super login page) BEFORE READING LOGS ---
+      - name: Force token emission to logs (hit super login page)
+        run: |
+          for i in {1..60}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8111/login.html?super=1" || true)
+            if [ "$code" = "200" ] || [ "$code" = "302" ] || [ "$code" = "401" ]; then
+              echo "Super login page reached (HTTP $code)"; break
+            fi
+            echo "Waiting for super login page..."; sleep 2
+          done
+
       - name: Extract Super User token (robust) and complete first-run
         run: |
-          # Helper that prints a token if present in any source
-          get_token () {
+          extract_token() {
             docker exec "${TC_CID}" sh -lc '
               sed -nE "s/.*[Ss]uper user authentication token: *\"?([0-9]+)\"?.*/\1/p" \
-                /opt/teamcity/logs/teamcity-server.log \
-                /opt/teamcity/logs/teamcity-startup.log 2>/dev/null | tail -n1
+                /opt/teamcity/logs/teamcity-startup.log \
+                /opt/teamcity/logs/teamcity-server.log 2>/dev/null | tail -n1
             '
           }
 
-          # Try up to ~10 minutes (TeamCity may be slow on first boot)
           TOKEN=""
-          for i in {1..300}; do
-            TOKEN="$(get_token || true)"
+          for i in {1..120}; do
+            TOKEN="$(extract_token || true)"
             if [ -z "$TOKEN" ]; then
-              # also scan the live console output as a fallback
               TOKEN=$(docker logs "${TC_CID}" --since 30s 2>&1 \
                 | sed -nE 's/.*[Ss]uper user authentication token: *"?([0-9]+)"?.*/\1/p' | tail -n1)
             fi
-            if [ -n "$TOKEN" ]; then
-              echo "Got token: ${#TOKEN} digits"
-              break
-            fi
+            [ -n "$TOKEN" ] && { echo "Got token (${#TOKEN} digits)"; break; }
             echo "Waiting for token in logs..."; sleep 2
           done
 
           if [ -z "$TOKEN" ]; then
-            echo "Could not find Super User token. Showing current startup state lines:"
+            echo "No token found. Current startup stage lines:"
             docker exec "${TC_CID}" sh -lc "grep -a 'Current stage:' -n /opt/teamcity/logs/teamcity-server.log | tail -n 10 || true"
-            echo "--- last 200 lines of teamcity-startup.log ---"
+            echo "--- startup.log (tail) ---"
             docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-startup.log || true"
-            echo "--- last 200 lines of teamcity-server.log ---"
+            echo "--- server.log (tail) ---"
             docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
             exit 1
           fi
 
           echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          # Finish first-run (JetBrains’ documented flow: POST token to /mnt/do/authenticate)
+          # Headless confirmation of first start
           curl -fsS -X POST "http://localhost:8111/mnt/do/authenticate?token=$TOKEN" || true
 
       - name: Wait for TeamCity READY
@@ -132,7 +137,7 @@ jobs:
           echo "GITHUB_DOCKER_NETWORK=$NET" >> "$GITHUB_ENV"
           echo "BASE_URL=http://teamcity:8111" >> "$GITHUB_ENV"
 
-      # Start Selenoid only for UI runs, and put browsers on the same network as TeamCity
+      # Start Selenoid only for UI runs, and put browsers on same network as TeamCity
       - name: Start Selenoid (Chrome+Firefox on same network)
         if: ${{ inputs.package == 'ui' }}
         uses: Xotabu4/selenoid-github-action@v2
