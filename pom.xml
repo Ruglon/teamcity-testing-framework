@@ -14,11 +14,11 @@
                 <artifactId>maven-checkstyle-plugin</artifactId>
                 <version>3.6.0</version>
                 <configuration>
-                    <!-- Resolved from the repo root on any module/OS -->
-                    <configLocation>checkstyle/checkstyle.xml</configLocation>
+                    <configLocation>${maven.multiModuleProjectDirectory}/checkstyle.xml</configLocation>
                     <consoleOutput>true</consoleOutput>
                     <failOnViolation>true</failOnViolation>
                 </configuration>
+
                 <executions>
                     <execution>
                         <id>validate</id>
