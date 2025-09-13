@@ -14,17 +14,10 @@
                 <artifactId>maven-checkstyle-plugin</artifactId>
                 <version>3.6.0</version>
                 <configuration>
-                    <!-- Use your config file (or google_checks.xml if you prefer) -->
-                    <configLocation>config/checkstyle/checkstyle.xml</configLocation>
-
-                    <!-- show violations in CI logs -->
+                    <!-- Resolved from the repo root on any module/OS -->
+                    <configLocation>${maven.multiModuleProjectDirectory}/config/checkstyle/checkstyle.xml</configLocation>
                     <consoleOutput>true</consoleOutput>
-
-                    <!-- keep this true when you want builds to fail on violations -->
                     <failOnViolation>true</failOnViolation>
-
-                    <!-- DO NOT set <encoding> here; it’s not a valid param for 3.6.0 -->
-                    <!-- rely on <project.build.sourceEncoding> above -->
                 </configuration>
                 <executions>
                     <execution>
