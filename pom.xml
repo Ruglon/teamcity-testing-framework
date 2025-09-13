@@ -14,15 +14,17 @@
                 <artifactId>maven-checkstyle-plugin</artifactId>
                 <version>3.6.0</version>
                 <configuration>
-                    <!-- point to your rules -->
+                    <!-- Use your config file (or google_checks.xml if you prefer) -->
                     <configLocation>config/checkstyle/checkstyle.xml</configLocation>
-                    <!-- show violations in console -->
+
+                    <!-- show violations in CI logs -->
                     <consoleOutput>true</consoleOutput>
-                    <!-- fail build on violations; flip to false temporarily if you just want a report -->
+
+                    <!-- keep this true when you want builds to fail on violations -->
                     <failOnViolation>true</failOnViolation>
-                    <!-- optional: encoding and tool version -->
-                    <encoding>UTF-8</encoding>
-                    <linkXRef>false</linkXRef>
+
+                    <!-- DO NOT set <encoding> here; it’s not a valid param for 3.6.0 -->
+                    <!-- rely on <project.build.sourceEncoding> above -->
                 </configuration>
                 <executions>
                     <execution>
