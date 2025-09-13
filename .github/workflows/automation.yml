@@ -14,15 +14,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Make mvnw runnable on Linux runners (handles both CRLF and missing +x)
-      - name: Normalize Maven Wrapper
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+          cache: maven
+
+      # Pick Maven wrapper if fully present, otherwise install Maven and use `mvn`
+      - name: Choose Maven (wrapper or system)
         run: |
-          if [ ! -f mvnw ]; then
-            echo "mvnw not found at repo root"; exit 1
+          set -e
+          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
+            # normalize line endings & permissions just in case
+            sed -i 's/\r$//' mvnw || true
+            chmod +x mvnw || true
+            echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+          else
+            echo "Maven Wrapper not found or incomplete. Installing Maven..."
+            sudo apt-get update
+            sudo apt-get install -y maven
+            echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
           fi
-          sed -i 's/\r$//' mvnw || true
-          chmod +x mvnw || true
-          ./mvnw -v
+          $MVN_CMD -v
+
+      - name: Validate Checkstyle
+        run: ${{ env.MVN_CMD }} -B validate
+
+  run-tests:
+    needs: validate-checkstyle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -31,29 +54,26 @@ jobs:
           distribution: 'zulu'
           cache: maven
 
-      - name: Validate Checkstyle
-        run: ./mvnw -B validate
-
-  run-tests:
-    needs: validate-checkstyle
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Same normalization here too
-      - name: Normalize Maven Wrapper
+      # Repeat the same chooser (env doesn’t persist across jobs)
+      - name: Choose Maven (wrapper or system)
         run: |
-          if [ ! -f mvnw ]; then
-            echo "mvnw not found at repo root"; exit 1
+          set -e
+          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
+            sed -i 's/\r$//' mvnw || true
+            chmod +x mvnw || true
+            echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+          else
+            echo "Maven Wrapper not found or incomplete. Installing Maven..."
+            sudo apt-get update
+            sudo apt-get install -y maven
+            echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
           fi
-          sed -i 's/\r$//' mvnw || true
-          chmod +x mvnw || true
-          ./mvnw -v
+          $MVN_CMD -v
 
       - name: TeamCity Setup
         uses: ./.github/actions/teamcity-setup
 
       - name: Run tests
-        # keep or remove continue-on-error as you prefer
         continue-on-error: true
-        run: ./mvnw -B test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
+        # Run only tests for the chosen package (api|ui)
+        run: ${{ env.MVN_CMD }} -B test -Dtest="com.example.teamcity.${{ inputs.package }}.**" -Dgroups=Regression
