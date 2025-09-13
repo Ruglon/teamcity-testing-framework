@@ -50,18 +50,37 @@ jobs:
             echo "Waiting (healthy)..."; sleep 2
           done
 
+      - name: Locate TeamCity container ID
+        id: find-tc
+        run: |
+          for i in {1..60}; do
+            TC_CID=$(docker ps --filter "ancestor=jetbrains/teamcity-server:2025.07.1" -q | head -n1)
+            if [ -n "$TC_CID" ]; then
+              echo "Found TeamCity CID: $TC_CID"
+              echo "tcid=$TC_CID" >> "$GITHUB_OUTPUT"
+              echo "TC_CID=$TC_CID" >> "$GITHUB_ENV"
+              docker ps --format "table {{.ID}}\t{{.Image}}\t{{.Names}}"
+              break
+            fi
+            echo "Waiting for TeamCity container id..."; sleep 2
+          done
+          if [ -z "$TC_CID" ]; then
+            echo "Could not find TeamCity container. Dumping docker ps:"
+            docker ps -a
+            exit 1
+          fi
+
       - name: Extract Super User token (with retry) and complete first-run
         run: |
-          TC_NAME=teamcity
           for i in {1..120}; do
-            TOKEN=$(docker exec "$TC_NAME" sh -lc \
+            TOKEN=$(docker exec "${TC_CID}" sh -lc \
               "grep -a 'Super user authentication token' /opt/teamcity/logs/teamcity-server.log | tail -1 | awk -F': ' '{print \$NF}' | tr -d ' '") || true
             if [ -n "$TOKEN" ]; then echo "Got token"; break; fi
             echo "Waiting for token in logs..."; sleep 2
           done
           if [ -z "$TOKEN" ]; then
-            echo "Could not find Super User token. Dumping last 200 lines:"
-            docker exec "$TC_NAME" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
+            echo "Could not find Super User token. Last 200 lines:"
+            docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
             exit 1
           fi
           echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
@@ -80,7 +99,7 @@ jobs:
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
           if [ "$code" != "200" ]; then
             echo "TeamCity never reached READY. Dumping recent logs:"
-            docker exec teamcity sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
+            docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
             exit 1
           fi
           echo "HOST=localhost" >> "$GITHUB_ENV"
@@ -88,7 +107,7 @@ jobs:
 
       - name: Discover TeamCity network (for UI browsers)
         run: |
-          NET=$(docker inspect teamcity --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s" $k}}{{end}}')
+          NET=$(docker inspect "${TC_CID}" --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s" $k}}{{end}}')
           echo "GITHUB_DOCKER_NETWORK=$NET" >> "$GITHUB_ENV"
           echo "BASE_URL=http://teamcity:8111" >> "$GITHUB_ENV"
 
@@ -122,8 +141,8 @@ jobs:
           HOST: ${{ env.HOST }}
           SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
           TEAMCITY_URL: ${{ env.TEAMCITY_URL }}
-          BASE_URL: ${{ env.BASE_URL }}               # used by UI tests (inside browser: http://teamcity:8111)
-          SELENOID_URL: http://localhost:4444/wd/hub  # used by UI tests
+          BASE_URL: ${{ env.BASE_URL }}               # UI tests (inside browser: http://teamcity:8111)
+          SELENOID_URL: http://localhost:4444/wd/hub  # UI tests
           PACKAGE: ${{ inputs.package }}
         run: |
           echo "Package=${PACKAGE}"
