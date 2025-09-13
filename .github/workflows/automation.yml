@@ -24,7 +24,8 @@ jobs:
     services:
       teamcity:
         image: jetbrains/teamcity-server:2025.07.1
-        ports: [ "8111:8111" ]
+        ports:
+          - 8111:8111
         env:
           TEAMCITY_SERVER_OPTS: "-Djava.security.manager=allow"
 
@@ -32,37 +33,82 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # --- Pick ONE of the two blocks below ---
-
-      # A) Start Selenoid (Selenium-compatible grid at :4444)
-      - name: Start Selenoid
-        uses: Xotabu4/selenoid-github-action@v2
-
-      # B) (Alternative) Selenium Standalone (comment A if you use B)
-      # - name: Start Selenium Standalone (Chrome)
-      #   run: |
-      #     docker run -d --rm --name grid -p 4444:4444 --shm-size=2g selenium/standalone-chrome:4.35.0-20250828
-      #     for i in {1..120}; do
-      #       if curl -fsS http://localhost:4444/status | jq -er '.value.ready' ; then break; fi
-      #       sleep 2
-      #     done
-
-      - name: Wait for TeamCity HTTP
+      - name: Prove the container is really running (ps, ports)
         run: |
-          for i in {1..180}; do
-            if curl -fsS http://localhost:8111/ >/dev/null; then
-              echo "TeamCity is responding"; break
+          echo "--- docker ps ---"
+          docker ps
+          echo "--- curl 8111 (may be 200/503 during start) ---"
+          curl -s -I http://localhost:8111 || true
+
+      - name: Wait for TeamCity JVM (healthy)
+        run: |
+          for i in {1..240}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
+            if [ "$code" = "200" ]; then
+              echo "Healthy = 200"; break
             fi
-            echo "Waiting for TeamCity..."
-            sleep 2
+            echo "Waiting (healthy)..."; sleep 2
           done
 
-      - name: Extract TeamCity Super User token
-        id: super
+      - name: Extract Super User token (with retry) and complete first-run
         run: |
-          cid=$(docker ps --filter "ancestor=jetbrains/teamcity-server:2025.07.1" -q | head -n1)
-          token=$(docker exec "$cid" sh -lc "grep -oE 'Super user authentication token: [0-9]+' /data/teamcity/logs/teamcity-server.log | tail -1 | awk '{print \$6}'")
-          echo "token=$token" >> "$GITHUB_OUTPUT"
+          TC_NAME=teamcity
+          for i in {1..120}; do
+            TOKEN=$(docker exec "$TC_NAME" sh -lc \
+              "grep -a 'Super user authentication token' /opt/teamcity/logs/teamcity-server.log | tail -1 | awk -F': ' '{print \$NF}' | tr -d ' '") || true
+            if [ -n "$TOKEN" ]; then echo "Got token"; break; fi
+            echo "Waiting for token in logs..."; sleep 2
+          done
+          if [ -z "$TOKEN" ]; then
+            echo "Could not find Super User token. Dumping last 200 lines:"
+            docker exec "$TC_NAME" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
+            exit 1
+          fi
+          echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          # Headless first-run completion (harmless if already done)
+          curl -fsS -X POST "http://localhost:8111/mnt/do/authenticate?token=$TOKEN" || true
+
+      - name: Wait for TeamCity READY
+        run: |
+          for i in {1..300}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
+            if [ "$code" = "200" ]; then
+              echo "Ready = 200"; break
+            fi
+            echo "Waiting (ready: $code)..."; sleep 2
+          done
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
+          if [ "$code" != "200" ]; then
+            echo "TeamCity never reached READY. Dumping recent logs:"
+            docker exec teamcity sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
+            exit 1
+          fi
+          echo "HOST=localhost" >> "$GITHUB_ENV"
+          echo "TEAMCITY_URL=http://localhost:8111" >> "$GITHUB_ENV"
+
+      - name: Discover TeamCity network (for UI browsers)
+        run: |
+          NET=$(docker inspect teamcity --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s" $k}}{{end}}')
+          echo "GITHUB_DOCKER_NETWORK=$NET" >> "$GITHUB_ENV"
+          echo "BASE_URL=http://teamcity:8111" >> "$GITHUB_ENV"
+
+      # Start Selenoid only for UI runs, and put browsers on the same network as TeamCity
+      - name: Start Selenoid (Chrome+Firefox on same network)
+        if: ${{ inputs.package == 'ui' }}
+        uses: Xotabu4/selenoid-github-action@v2
+        with:
+          selenoid-start-arguments: |
+            --browsers 'chrome;firefox' --last-versions 1
+            --args "-container-network ${{ env.GITHUB_DOCKER_NETWORK }}"
+
+      - name: Wait for Selenoid
+        if: ${{ inputs.package == 'ui' }}
+        run: |
+          for i in {1..120}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4444/status || true)
+            if [ "$code" = "200" ]; then echo "Selenoid ready"; break; fi
+            echo "Waiting for Selenoid..."; sleep 2
+          done
 
       - name: Set up JDK 17 (cache Maven)
         uses: actions/setup-java@v4
@@ -73,39 +119,49 @@ jobs:
 
       - name: Build & Test with Maven
         env:
-          # Keep your old names, so your tests keep working:
-          HOST: localhost
-          SUPER_USER_TOKEN: ${{ steps.super.outputs.token }}
-          # Also pass explicit variables most frameworks expect:
-          TEAMCITY_URL: http://localhost:8111
-          SELENOID_URL: http://localhost:4444/wd/hub
+          HOST: ${{ env.HOST }}
+          SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
+          TEAMCITY_URL: ${{ env.TEAMCITY_URL }}
+          BASE_URL: ${{ env.BASE_URL }}               # used by UI tests (inside browser: http://teamcity:8111)
+          SELENOID_URL: http://localhost:4444/wd/hub  # used by UI tests
           PACKAGE: ${{ inputs.package }}
         run: |
           echo "Package=${PACKAGE}"
-          mvn -B -Dtc.url="${TEAMCITY_URL}" -Dtc.super="${SUPER_USER_TOKEN}" -Dselenium.remote="${SELENOID_URL}" clean test
+          mvn -B \
+            -Dtc.url="${TEAMCITY_URL}" \
+            -Dtc.super="${SUPER_USER_TOKEN}" \
+            -DbaseUrl="${BASE_URL}" \
+            -Dselenium.remote="${SELENOID_URL}" \
+            clean test
 
-      # --- Swagger coverage (API only) ---
+      # ---- Swagger coverage (API only) ----
       - name: Ensure coverage dir exists
         if: ${{ inputs.package == 'api' }}
         run: |
           mkdir -p target/swagger-coverage-output
-          # create the *same* filename you later upload
           if [ ! -e target/swagger-coverage-output/swagger-coverage-results.json ]; then
             echo "{}" > target/swagger-coverage-output/swagger-coverage-results.json
           fi
+
+      - name: Install swagger-coverage CLI (optional)
+        if: ${{ inputs.package == 'api' }}
+        run: |
+          curl -fsSL -o sc.zip https://github.com/serenity-bdd/swagger-coverage-commandline/releases/latest/download/swagger-coverage-commandline.zip || true
+          unzip -o sc.zip -d . || true
+          chmod +x .swagger-coverage-commandline/bin/swagger-coverage || true
 
       - name: Run Swagger Coverage
         if: ${{ inputs.package == 'api' }}
         continue-on-error: true
         env:
-          TEAMCITY_URL: http://localhost:8111
+          TEAMCITY_URL: ${{ env.TEAMCITY_URL }}
         run: |
           if [ -x .swagger-coverage-commandline/bin/swagger-coverage ]; then
             .swagger-coverage-commandline/bin/swagger-coverage \
               -s "${TEAMCITY_URL}/app/rest/swagger.json" \
               -i target/swagger-coverage-output || true
           else
-            echo "swagger-coverage CLI not found; skipping (install it or check it in)"
+            echo "swagger-coverage CLI not found; skipping"
           fi
 
       - name: Save Swagger Coverage
@@ -116,7 +172,7 @@ jobs:
           path: target/swagger-coverage-output/**
           if-no-files-found: warn
 
-      # --- Allure (always try to build) ---
+      # ---- Allure (always try to build) ----
       - name: Load Test Report History
         if: always()
         uses: actions/checkout@v4
