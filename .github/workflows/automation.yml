@@ -44,8 +44,8 @@ jobs:
           overwrite: true
 
   run-tests:
-    needs: validate-checkstyle     # ← run AFTER checkstyle finishes
-    if: ${{ always() }}            # ← run even if previous job had issues
+    needs: validate-checkstyle
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -56,25 +56,28 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # ⬇️ Your composite action starts Selenoid + TeamCity, finishes first-start, exposes token/urls
+      # Start ONLY TeamCity + finish first-start (your composite)
       - name: TeamCity Setup
         id: setup
         uses: ./.github/actions/teamcity-setup
 
-      - name: Run tests (skip Checkstyle here)
-        env:
-          TC_URL: ${{ steps.setup.outputs.teamcity_url }}
-          BASE_URL: ${{ steps.setup.outputs.base_url }}
-          SELENOID: ${{ steps.setup.outputs.selenoid_url }}
-          TOKEN: ${{ steps.setup.outputs.super_user_token }}
+      # Start Selenoid in this job
+      - name: Start Selenoid
+        uses: Xotabu4/selenoid-github-action@v2
+
+      # Run UI tests against Selenoid
+      - name: Run UI tests (remote to Selenoid)
         run: |
-          mvn -B -Dcheckstyle.skip=true \
-            -Dtc.url="${TC_URL}" \
-            -Dtc.super="${TOKEN}" \
-            -Dselenium.remote="${SELENOID}" \
-            -DbaseUrl="${BASE_URL}" \
-            -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
+          # use wrapper if present, else system maven
+          if [ -f mvnw ]; then MVN=./mvnw; else MVN=mvn; fi
+          $MVN -B \
+            -Dcheckstyle.skip=true \
+            -Dselenide.remote=http://localhost:4444/wd/hub \
+            -Dselenide.browser=chrome \
+            -Dselenide.headless=true \
+            -Dselenide.baseUrl=http://host.docker.internal:8111 \
             -Dgroups=Regression \
+            -Dtest="teamcity.ui.**" \
             test
 
       - name: Upload test reports
@@ -86,3 +89,4 @@ jobs:
             **/target/surefire-reports/**
             **/target/failsafe-reports/**
           if-no-files-found: ignore
+
