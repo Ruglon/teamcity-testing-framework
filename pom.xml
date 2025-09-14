@@ -17,7 +17,7 @@
                         <artifactId>maven-checkstyle-plugin</artifactId>
                         <version>3.6.0</version>
                         <configuration>
-                            <configLocation>${maven.multiModuleProjectDirectory}checkstyle.xml</configLocation>
+                            <configLocation>${maven.multiModuleProjectDirectory}\checkstyle.xml</configLocation>
                             <consoleOutput>true</consoleOutput>
                             <failOnViolation>true</failOnViolation>
                         </configuration>

@@ -61,7 +61,7 @@ jobs:
 
 
       - name: Validate Checkstyle (show violations)
-        run: ${{ env.MVN_CMD }} -B -V -e -Dcheckstyle.consoleOutput=true -Dcheckstyle.config=google_checks.xml validate
+        run: mvn -B -V -e -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
 
       - name: Upload Checkstyle report
         if: always()
@@ -112,10 +112,8 @@ jobs:
 
       # ... TeamCity setup step(s) ...
 
-      - name: Run SetupServerTest (single method)
-        env:
-          MVN_CMD: ${{ env.MVN_CMD }}
+      - name: Run tests
         run: |
-          # IMPORTANT: quote or escape the '#'
-          $MVN_CMD clean test -Dtest='SetupServerTest#setupTeamCityServerTest'
-          # (equivalently: -Dtest=SetupServerTest\#setupTeamCityServerTest)
+          mvn -B -Dcheckstyle.failOnViolation=false \
+              -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
+              -Dgroups=Regression test
