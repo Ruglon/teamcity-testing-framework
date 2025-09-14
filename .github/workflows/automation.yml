@@ -8,39 +8,35 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   validate-checkstyle:
     runs-on: ubuntu-latest
+    continue-on-error: true       # ← even if the step fails, this job won’t block others
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
+          distribution: zulu
           java-version: '21'
-          distribution: 'zulu'
-
+          cache: maven
       - name: Choose Maven (wrapper or system)
         run: |
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true
-            chmod +x mvnw || true
-            echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+            sed -i 's/\r$//' mvnw || true; chmod +x mvnw || true; echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
           else
-            sudo apt-get update && sudo apt-get install -y maven
-            echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
+            sudo apt-get update && sudo apt-get install -y maven; echo "MVN_CMD=mvn" >> $GITHUB_ENV
           fi
-          ${{ env.MVN_CMD }} -v
-          java -version
-
-      - name: Validate Checkstyle (do not fail CI)
-        run: ${{ env.MVN_CMD }} -DskipTests -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
-
-      - name: Upload Checkstyle report (always)
+      - name: Run Checkstyle (do not fail CI)
+        # failOnViolation=false makes the step exit 0; job-level continue-on-error is a second safety net
+        run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
+      - name: Upload Checkstyle report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: checkstyle-report
+          name: checkstyle-report-${{ github.run_attempt }}
           path: |
             **/target/checkstyle-result.xml
             **/target/checkstyle-cachefile
@@ -48,182 +44,54 @@ jobs:
           overwrite: true
 
   run-tests:
-    # make sure tests start ONLY after checkstyle finished
-    needs: validate-checkstyle
+    needs: validate-checkstyle     # ← run AFTER checkstyle finishes
+    if: ${{ always() }}            # ← run even if previous job had issues
     runs-on: ubuntu-latest
     timeout-minutes: 40
-
-    services:
-      teamcity:
-        image: jetbrains/teamcity-server:2025.07.1
-        ports:
-          - 8111:8111
-        env:
-          TEAMCITY_SERVER_OPTS: "-Djava.security.manager=allow"
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Prove container is running
-        run: |
-          docker ps
-          curl -s -I http://localhost:8111 || true
-
-      - name: Wait for TeamCity JVM (healthy)
-        run: |
-          for i in {1..240}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
-            [ "$code" = "200" ] && { echo "Healthy=200"; break; }
-            echo "Waiting healthy ($code)..."; sleep 2
-          done
-          
-      - name: TeamCity Setup
-        id: setup
-        uses: ./.github/actions/teamcity-setup
-
-      - name: Run tests (skip checkstyle here)
-        run: |
-              mvn -B -Dcheckstyle.skip=true \
-                -Dtc.url="${TC_URL}" \
-                -Dtc.super="${TOKEN}" \
-                -Dselenium.remote="${SELENOID}" \
-                -DbaseUrl="${BASE}" \
-                -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
-                -Dgroups=Regression test
-        env:
-              TC_URL:    ${{ steps.setup.outputs.teamcity_url }}   # http://localhost:8111
-              BASE:      ${{ steps.setup.outputs.base_url }}       # http://teamcity:8111
-              SELENOID:  ${{ steps.setup.outputs.selenoid_url }}   # http://localhost:4444/wd/hub
-              TOKEN:     ${{ steps.setup.outputs.super_user_token }}
-        
-
-        # --- NEW: confirm first start headlessly ---
-      - name: Confirm first start (headless)
-        run: |
-          set -euo pipefail
-
-          # 1) Wait until /mnt/ responds
-          for i in {1..180}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/mnt/ || true)
-            [[ "$code" =~ ^(200|302|401)$ ]] && { echo "/mnt reachable ($code)"; break; }
-            echo "Waiting /mnt ($code)..."; sleep 2
-          done
-
-          # 2) Obtain CSRF token (TeamCity docs: X-TC-CSRF-Token)
-          #    Save cookies for subsequent POST
-          CSRF=$(curl -s -c cookies.txt "http://localhost:8111/authenticationTest.html?csrf" || true)
-          if [ -z "$CSRF" ]; then
-            # fallback: sometimes token is echoed in body/cookie; try to read from cookies file
-            CSRF=$(grep -o 'tc-csrf-token=[^;]*' cookies.txt | cut -d= -f2 || true)
-          fi
-          echo "csrf=$CSRF"
-
-          # 3) Discover form action from /mnt (best-effort; default to a common endpoint)
-          HTML=$(curl -s -b cookies.txt http://localhost:8111/mnt/ || true)
-          ACTION=$(printf "%s" "$HTML" | sed -nE 's/.*action="([^"]*confirm[^"]*)".*/\1/p' | head -n1)
-          if [ -z "$ACTION" ]; then
-            ACTION="/mnt/do/confirmFirstStart.html"
-          fi
-          # normalize: ensure it starts with /
-          case "$ACTION" in
-            http* ) BASE="";;  # absolute URL already
-            /* )    BASE="";;
-            * )     BASE="/";;
-          esac
-
-          echo "POST confirm to: ${BASE}${ACTION}"
-          curl -fsS -b cookies.txt -H "X-TC-CSRF-Token: $CSRF" -X POST "http://localhost:8111${BASE}${ACTION}" || true
-
-      - name: Force super-login page (helps token appear)
-        run: |
-          for i in {1..120}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8111/login.html?super=1" || true)
-            [[ "$code" =~ ^(200|302|401)$ ]] && { echo "super login page OK ($code)"; break; }
-            echo "Waiting super page ($code)..."; sleep 2
-          done
-
-      - name: Find TeamCity container id
-        id: tcid
-        run: |
-          TC_CID=$(docker ps --filter "ancestor=jetbrains/teamcity-server:2025.07.1" -q | head -n1)
-          [ -z "$TC_CID" ] && { echo "No TeamCity container"; docker ps -a; exit 1; }
-          echo "tcid=$TC_CID" >> "$GITHUB_OUTPUT"
-          echo "TC_CID=$TC_CID" >> "$GITHUB_ENV"
-          docker ps --format "table {{.ID}}\t{{.Image}}\t{{.Names}}"
-
-      - name: Extract Super User token and complete first-run
-        run: |
-          extract_token() {
-            docker exec "${TC_CID}" sh -lc '
-              sed -nE "s/.*[Ss]uper user authentication token: *\"?([0-9]+)\"?.*/\1/p" \
-                /opt/teamcity/logs/teamcity-startup.log \
-                /opt/teamcity/logs/teamcity-server.log 2>/dev/null | tail -n1
-            '
-          }
-          TOKEN=""
-          for i in {1..300}; do
-            TOKEN="$(extract_token || true)"
-            [ -z "$TOKEN" ] && TOKEN=$(docker logs "${TC_CID}" --since 30s 2>&1 \
-              | sed -nE 's/.*[Ss]uper user authentication token: *"?([0-9]+)"?.*/\1/p' | tail -n1)
-            [ -n "$TOKEN" ] && { echo "Got token (${#TOKEN} digits)"; break; }
-            echo "Waiting for token in logs..."; sleep 2
-          done
-
-          if [ -z "$TOKEN" ]; then
-            echo "Token not found. Current startup stage lines:"
-            docker exec "${TC_CID}" sh -lc "grep -a 'Current stage:' -n /opt/teamcity/logs/teamcity-server.log | tail -n 10 || true"
-            echo "--- startup.log (tail) ---"
-            docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-startup.log || true"
-            echo "--- server.log (tail) ---"
-            docker exec "${TC_CID}" sh -lc "tail -n 200 /opt/teamcity/logs/teamcity-server.log || true"
-            exit 1
-          fi
-
-          echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          echo "TEAMCITY_URL=http://localhost:8111" >> "$GITHUB_ENV"
-          echo "HOST=localhost" >> "$GITHUB_ENV"
-
-          # finish maintenance
-          curl -fsS -X POST "http://localhost:8111/mnt/do/authenticate?token=$TOKEN" || true
-
-          # now wait READY
-          for i in {1..300}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
-            [ "$code" = "200" ] && { echo "Ready=200"; break; }
-            echo "Waiting ready ($code)..."; sleep 2
-          done
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
-          [ "$code" = "200" ] || { echo "TeamCity never reached READY"; exit 1; }
-
-      - name: Set up JDK 21 (cache Maven)
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: zulu
           java-version: '21'
           cache: maven
 
+      # ⬇️ Your composite action starts Selenoid + TeamCity, finishes first-start, exposes token/urls
+      - name: TeamCity Setup
+        id: setup
+        uses: ./.github/actions/teamcity-setup
+
       - name: Choose Maven (wrapper or system)
         run: |
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true
-            chmod +x mvnw || true
-            echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+            sed -i 's/\r$//' mvnw || true; chmod +x mvnw || true; echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
           else
-            sudo apt-get update && sudo apt-get install -y maven
-            echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
+            sudo apt-get update && sudo apt-get install -y maven; echo "MVN_CMD=mvn" >> $GITHUB_ENV
           fi
-          ${{ env.MVN_CMD }} -v
 
-      - name: Run tests
+      - name: Run tests (skip Checkstyle here)
         env:
-          TEAMCITY_URL: ${{ env.TEAMCITY_URL }}
-          SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
-          HOST: ${{ env.HOST }}
+          TC_URL:   ${{ steps.setup.outputs.teamcity_url }}     # http://localhost:8111
+          BASE_URL: ${{ steps.setup.outputs.base_url }}         # http://teamcity:8111
+          SELENOID: ${{ steps.setup.outputs.selenoid_url }}     # http://localhost:4444/wd/hub
+          TOKEN:    ${{ steps.setup.outputs.super_user_token }}
         run: |
           ${{ env.MVN_CMD }} -B \
-            -Dtc.url="${TEAMCITY_URL}" \
-            -Dtc.super="${SUPER_USER_TOKEN}" \
-            -Dhost="${HOST}" \
-            -Dgroups=Regression \
+            -Dcheckstyle.skip=true \        # ← THE KEY: no Checkstyle in this job
+            -Dtc.url="${TC_URL}" \
+            -Dtc.super="${TOKEN}" \
+            -Dselenium.remote="${SELENOID}" \
+            -DbaseUrl="${BASE_URL}" \
             -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
+            -Dgroups=Regression \
             test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ inputs.package }}-${{ github.run_attempt }}
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
