@@ -77,25 +77,32 @@ jobs:
           overwrite: false
 
   run-tests:
-    needs: validate-checkstyle
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    # Start TeamCity as a job-level service
+    services:
+      teamcity:
+        image: jetbrains/teamcity-server:2025.07.1
+        ports:
+          - 8111:8111
+        env:
+          TEAMCITY_SERVER_OPTS: "-Djava.security.manager=allow"
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
+          distribution: zulu
           java-version: '21'
-          distribution: 'zulu'
           cache: maven
 
-      # Repeat chooser in this job (env doesn’t persist across jobs)
-      # after actions/checkout and setup-java
       - name: Choose Maven (wrapper or system)
         run: |
           set -e
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            # normalize wrapper for Linux
             sed -i 's/\r$//' mvnw || true
             chmod +x mvnw || true
             CMD=./mvnw
@@ -110,10 +117,106 @@ jobs:
           $CMD -v
           java -version
 
-      # ... TeamCity setup step(s) ...
+      - name: Prove TeamCity container is up
+        run: |
+          docker ps
+          curl -s -I http://localhost:8111 || true
+
+      - name: Wait healthy, force super page, extract token, complete first-run
+        id: tc
+        shell: bash
+        run: |
+          # wait for healthy
+          for i in {1..240}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
+            [ "$code" = "200" ] && break
+            echo "Waiting healthy..."; sleep 2
+          done
+
+          # find container id by image
+          TC_CID=$(docker ps --filter "ancestor=jetbrains/teamcity-server:2025.07.1" -q | head -n1)
+          [ -z "$TC_CID" ] && { echo "No TeamCity container"; docker ps -a; exit 1; }
+
+          # hit super page to trigger token emission to logs
+          for i in {1..120}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8111/login.html?super=1" || true)
+            [[ "$code" =~ ^(200|302|401)$ ]] && break
+            echo "Waiting super login page..."; sleep 2
+          done
+
+          # extract token from startup/server logs (fallback to recent docker logs)
+          extract_token() {
+            docker exec "$TC_CID" sh -lc '
+              sed -nE "s/.*[Ss]uper user authentication token: *\"?([0-9]+)\"?.*/\1/p" \
+                /opt/teamcity/logs/teamcity-startup.log \
+                /opt/teamcity/logs/teamcity-server.log 2>/dev/null | tail -n1
+            '
+          }
+          TOKEN=""
+          for i in {1..180}; do
+            TOKEN="$(extract_token || true)"
+            [ -z "$TOKEN" ] && TOKEN=$(docker logs "$TC_CID" --since 30s 2>&1 | sed -nE 's/.*[Ss]uper user authentication token: *"?([0-9]+)"?.*/\1/p' | tail -n1)
+            [ -n "$TOKEN" ] && break
+            echo "Waiting for token in logs..."; sleep 2
+          done
+          [ -z "$TOKEN" ] && {
+            echo "Token not found. Current startup stage:" 
+            docker exec "$TC_CID" sh -lc "grep -a 'Current stage:' -n /opt/teamcity/logs/teamcity-server.log | tail -n 10 || true"
+            exit 1
+          }
+
+          echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "TEAMCITY_URL=http://localhost:8111" >> "$GITHUB_ENV"
+          echo "HOST=localhost" >> "$GITHUB_ENV"
+
+          # complete first-run
+          curl -fsS -X POST "http://localhost:8111/mnt/do/authenticate?token=$TOKEN" || true
+
+          # wait fully ready
+          for i in {1..300}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/ready || true)
+            [ "$code" = "200" ] && break
+            echo "Waiting ready ($code)..."; sleep 2
+          done
 
       - name: Run tests
+        env:
+          TEAMCITY_URL: ${{ env.TEAMCITY_URL }}
+          SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
+          HOST: ${{ env.HOST }}
         run: |
-          mvn -B -Dcheckstyle.failOnViolation=false \
-              -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
-              -Dgroups=Regression test
+          ${{ env.MVN_CMD }} -B \
+            -Dtc.url="${TEAMCITY_URL}" \
+            -Dtc.super="${SUPER_USER_TOKEN}" \
+            -Dhost="${HOST}" \
+            -Dgroups=Regression \
+            -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
+            test
+
+      # Helpful artifacts if something fails
+      - name: Upload surefire/failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ inputs.package }}-${{ github.run_attempt }}
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+
+      - name: Collect TeamCity logs
+        if: always()
+        run: |
+          CID=$(docker ps --filter "ancestor=jetbrains/teamcity-server:2025.07.1" -q | head -n1 || true)
+          if [ -n "$CID" ]; then
+            docker cp "$CID:/opt/teamcity/logs" ./tc-logs || true
+          fi
+
+      - name: Upload TeamCity logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teamcity-logs-${{ github.run_attempt }}
+          path: tc-logs/**
+          if-no-files-found: ignore
+
