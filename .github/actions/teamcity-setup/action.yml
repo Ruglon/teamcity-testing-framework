@@ -1,9 +1,24 @@
 name: TeamCity Setup
 description: Start Selenoid + TeamCity, finish first-start via UI, expose token and URLs
+
+# Outputs exposed to the caller workflow
+outputs:
+  teamcity_url:
+    description: "Runner → TeamCity URL"
+    value: ${{ steps.expose.outputs.teamcity_url }}
+  base_url:
+    description: "Browser → TeamCity URL (Docker network)"
+    value: ${{ steps.expose.outputs.base_url }}
+  selenoid_url:
+    description: "Runner → Selenoid URL"
+    value: ${{ steps.expose.outputs.selenoid_url }}
+  super_user_token:
+    description: "TeamCity super user token"
+    value: ${{ steps.token.outputs.super_user_token }}
+
 runs:
   using: "composite"
   steps:
-    # JDK 21 for building/launching the setup test
     - name: Set up JDK 21
       uses: actions/setup-java@v4
       with:
@@ -11,7 +26,12 @@ runs:
         java-version: "21"
         cache: maven
 
-    # Pick Maven wrapper if complete; else install Maven
+    - name: Ensure jq (used to probe Selenoid)
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y jq
+
     - name: Choose Maven (wrapper or system)
       shell: bash
       run: |
@@ -26,26 +46,22 @@ runs:
           sudo apt-get install -y maven
           echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
         fi
-        ${{ env.MVN_CMD }} -v
+        echo "Using Maven: ${MVN_CMD}"
+        "${MVN_CMD}" -v
         java -version
 
-    # Ensure browsers.json exists (course file). Abort early if missing.
     - name: Verify browsers.json
       shell: bash
       run: |
-        set -e
         if [ ! -f config/browsers.json ]; then
-          echo "::error::Missing config/browsers.json (commit it per the course)"
-          exit 1
+          echo "::error::Missing config/browsers.json (commit it per the course)"; exit 1
         fi
 
-    # Create a dedicated Docker network so containers can resolve each other by name
     - name: Create docker network
       shell: bash
       run: |
         docker network inspect tcnet >/dev/null 2>&1 || docker network create tcnet
 
-    # Start Selenoid bound to the same network
     - name: Start Selenoid
       shell: bash
       run: |
@@ -62,7 +78,6 @@ runs:
           -listen :4444 \
           -container-network tcnet \
           -session-attempt-timeout 3m
-        # wait until selenoid is ready
         for i in {1..120}; do
           if curl -fsS http://localhost:4444/status | jq -er '.value.ready' >/dev/null 2>&1; then
             echo "Selenoid ready"; break
@@ -70,8 +85,7 @@ runs:
           echo "Waiting Selenoid..."; sleep 2
         done
 
-    # Start TeamCity on the same network (course image)
-    - name: Start TeamCity
+    - name: Start TeamCity (2023.11.1 per course)
       shell: bash
       run: |
         set -e
@@ -83,86 +97,63 @@ runs:
           -v "$GITHUB_WORKSPACE/tmp/teamcity_server/datadir:/data/teamcity_server/datadir" \
           -v "$GITHUB_WORKSPACE/tmp/teamcity_server/logs:/opt/teamcity/logs" \
           nobugsme/teamcity-server:2023.11.1
-        # wait until JVM is healthy-ish
         for i in {1..240}; do
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
           [ "$code" = "200" ] && { echo "TeamCity healthy=200"; break; }
           echo "Waiting TeamCity healthy ($code)..."; sleep 2
         done
 
-    # Seed config.properties for the UI setup test
-    - name: Seed config.properties
+    - name: Seed config.properties for setup test
+      shell: bash
+      run: |
+        mkdir -p src/main/resources
+        printf '%s\n' \
+          'host=teamcity:8111' \
+          'remote=http://localhost:4444/wd/hub' \
+          > src/main/resources/config.properties
+
+    - name: Run SetupServerTest (complete first-start wizard)
       shell: bash
       run: |
         set -e
-        mkdir -p src/main/resources
-        # host must be resolvable FROM BROWSER CONTAINERS → use container name
-        # the runner connects to Selenoid at localhost
-        cat > src/main/resources/config.properties <<'PROPS'
-  host=teamcity:8111
-  remote=http://localhost:4444/wd/hub
-  PROPS
-  echo "Wrote src/main/resources/config.properties"
+        # Adjust the selector if your class/package is different:
+        "${MVN_CMD}" -B \
+          -Dcheckstyle.skip=true \
+          -Dselenium.remote="http://localhost:4444/wd/hub" \
+          -DbaseUrl="http://teamcity:8111" \
+          -Dtest='SetupServerTest#setupTeamCityServerTest' \
+          test
 
-# Run ONLY the first-start UI setup test (completes wizard)
-- name: Run SetupServerTest
-  shell: bash
-  run: |
-    set -e
-    # If your test class/method has a different package, adjust the -Dtest selector:
-    ${{ env.MVN_CMD }} -B \
-      -Dcheckstyle.skip=true \
-      -Dselenium.remote="http://localhost:4444/wd/hub" \
-      -DbaseUrl="http://teamcity:8111" \
-      -Dtest='SetupServerTest#setupTeamCityServerTest' \
-      test
+    - name: Force super-login page (token emission)
+      shell: bash
+      run: |
+        for i in {1..120}; do
+          code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8111/login.html?super=1" || true)
+          [[ "$code" =~ ^(200|302|401)$ ]] && { echo "Super login reachable ($code)"; break; }
+          echo "Waiting super-login page ($code)..."; sleep 2
+        done
 
-# Force super-login page so token is (re)printed, then scrape it
-- name: Extract Super User token
-  id: token
-  shell: bash
-  run: |
-    set -e
-    # Hit super-login page to ensure token line appears in logs
-    for i in {1..120}; do
-      code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8111/login.html?super=1" || true)
-      [[ "$code" =~ ^(200|302|401)$ ]] && break
-      echo "Waiting super-login page..."; sleep 2
-    done
-    # Scrape from both startup + server logs (mounted to ./tmp/…)
-    TOKEN=$(grep -aoE 'Super user authentication token: *"?([0-9]+)"?' \
-      tmp/teamcity_server/logs/teamcity-*.log 2>/dev/null \
-      | sed -E 's/.*: *"?([0-9]+)"?/\1/' | tail -n1)
-    if [ -z "$TOKEN" ]; then
-      echo "::error::Super user token not found in logs"
-      tail -n 200 tmp/teamcity_server/logs/teamcity-server.log || true
-      exit 1
-    fi
-    echo "super_user_token=$TOKEN" >> "$GITHUB_OUTPUT"
-    echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-    
-    # Append token to config.properties for API tests later
-    printf "\nsuperUserToken=%s\n" "$TOKEN" >> src/main/resources/config.properties
+    - name: Extract Super User token
+      id: token
+      shell: bash
+      run: |
+        set -e
+        TOKEN=$(grep -aoE 'Super user authentication token: *"?([0-9]+)"?' \
+          tmp/teamcity_server/logs/teamcity-*.log 2>/dev/null \
+          | sed -E 's/.*: *"?([0-9]+)"?/\1/' | tail -n1)
+        if [ -z "$TOKEN" ]; then
+          echo "::error::Super user token not found in logs"
+          tail -n 200 tmp/teamcity_server/logs/teamcity-server.log || true
+          exit 1
+        fi
+        echo "super_user_token=$TOKEN" >> "$GITHUB_OUTPUT"
+        echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+        printf "\nsuperUserToken=%s\n" "$TOKEN" >> src/main/resources/config.properties
 
-# Expose outputs for the caller workflow
-- name: Expose outputs
-  id: expose
-  shell: bash
-  run: |
-    echo "teamcity_url=http://localhost:8111" >> "$GITHUB_OUTPUT"
-    echo "base_url=http://teamcity:8111" >> "$GITHUB_OUTPUT"
-    echo "selenoid_url=http://localhost:4444/wd/hub" >> "$GITHUB_OUTPUT"
-
-outputs:
-  teamcity_url:
-    description: "Runner → TeamCity URL"
-    value: ${{ steps.expose.outputs.teamcity_url }}
-  base_url:
-    description: "Browser → TeamCity URL in Docker network"
-    value: ${{ steps.expose.outputs.base_url }}
-  selenoid_url:
-    description: "Runner → Selenoid URL"
-    value: ${{ steps.expose.outputs.selenoid_url }}
-  super_user_token:
-    description: "TeamCity super user token"
-    value: ${{ steps.token.outputs.super_user_token }}
+    - name: Expose outputs
+      id: expose
+      shell: bash
+      run: |
+        echo "teamcity_url=http://localhost:8111" >> "$GITHUB_OUTPUT"
+        echo "base_url=http://teamcity:8111" >> "$GITHUB_OUTPUT"
+        echo "selenoid_url=http://localhost:4444/wd/hub" >> "$GITHUB_OUTPUT"

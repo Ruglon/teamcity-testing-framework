@@ -61,23 +61,14 @@ jobs:
         id: setup
         uses: ./.github/actions/teamcity-setup
 
-      - name: Choose Maven (wrapper or system)
-        run: |
-          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true; chmod +x mvnw || true; echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
-          else
-            sudo apt-get update && sudo apt-get install -y maven; echo "MVN_CMD=mvn" >> $GITHUB_ENV
-          fi
-
       - name: Run tests (skip Checkstyle here)
         env:
-          TC_URL:   ${{ steps.setup.outputs.teamcity_url }}     # http://localhost:8111
-          BASE_URL: ${{ steps.setup.outputs.base_url }}         # http://teamcity:8111
-          SELENOID: ${{ steps.setup.outputs.selenoid_url }}     # http://localhost:4444/wd/hub
-          TOKEN:    ${{ steps.setup.outputs.super_user_token }}
+          TC_URL: ${{ steps.setup.outputs.teamcity_url }}
+          BASE_URL: ${{ steps.setup.outputs.base_url }}
+          SELENOID: ${{ steps.setup.outputs.selenoid_url }}
+          TOKEN: ${{ steps.setup.outputs.super_user_token }}
         run: |
-          ${{ env.MVN_CMD }} -B \
-            -Dcheckstyle.skip=true \        # ← THE KEY: no Checkstyle in this job
+          mvn -B -Dcheckstyle.skip=true \
             -Dtc.url="${TC_URL}" \
             -Dtc.super="${TOKEN}" \
             -Dselenium.remote="${SELENOID}" \
