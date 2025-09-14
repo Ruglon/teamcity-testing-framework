@@ -76,8 +76,28 @@ jobs:
             [ "$code" = "200" ] && { echo "Healthy=200"; break; }
             echo "Waiting healthy ($code)..."; sleep 2
           done
+          
+      - name: TeamCity Setup
+        id: setup
+        uses: ./.github/actions/teamcity-setup
 
-      # --- NEW: confirm first start headlessly ---
+      - name: Run tests (skip checkstyle here)
+        run: |
+              mvn -B -Dcheckstyle.skip=true \
+                -Dtc.url="${TC_URL}" \
+                -Dtc.super="${TOKEN}" \
+                -Dselenium.remote="${SELENOID}" \
+                -DbaseUrl="${BASE}" \
+                -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
+                -Dgroups=Regression test
+        env:
+              TC_URL:    ${{ steps.setup.outputs.teamcity_url }}   # http://localhost:8111
+              BASE:      ${{ steps.setup.outputs.base_url }}       # http://teamcity:8111
+              SELENOID:  ${{ steps.setup.outputs.selenoid_url }}   # http://localhost:4444/wd/hub
+              TOKEN:     ${{ steps.setup.outputs.super_user_token }}
+        
+
+        # --- NEW: confirm first start headlessly ---
       - name: Confirm first start (headless)
         run: |
           set -euo pipefail
