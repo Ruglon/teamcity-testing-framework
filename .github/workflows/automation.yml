@@ -63,15 +63,18 @@ jobs:
       - name: Validate Checkstyle (show violations)
         run: ${{ env.MVN_CMD }} -B -V -e -Dcheckstyle.consoleOutput=true -Dcheckstyle.config=google_checks.xml validate
 
-      - name: Upload Checkstyle report (always)
+      - name: Upload Checkstyle report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: checkstyle-report
+          # make the name unique across api/ui, jobs, and reruns
+          name: checkstyle-report-${{ inputs.package }}-${{ github.job }}-${{ github.run_attempt }}
           path: |
             **/target/checkstyle-result.xml
             **/target/checkstyle-cachefile
           if-no-files-found: ignore
+          compression-level: 6
+          overwrite: false
 
   run-tests:
     needs: validate-checkstyle
