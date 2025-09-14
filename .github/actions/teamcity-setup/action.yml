@@ -39,16 +39,18 @@ runs:
         if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
           sed -i 's/\r$//' mvnw || true
           chmod +x mvnw || true
-          echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+          MVN_CMD=./mvnw            # set shell var for THIS step
         else
           echo "Maven Wrapper missing/incomplete. Installing Maven..."
           sudo apt-get update -y
           sudo apt-get install -y maven
-          echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
+          MVN_CMD=mvn               # set shell var for THIS step
         fi
-        echo "Using Maven: ${MVN_CMD}"
-        "${MVN_CMD}" -v
+        echo "MVN_CMD=$MVN_CMD" >> "$GITHUB_ENV"   # for NEXT steps
+        echo "Using Maven: $MVN_CMD"
+        "$MVN_CMD" -v
         java -version
+    
 
     - name: Verify browsers.json
       shell: bash
