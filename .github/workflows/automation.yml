@@ -14,7 +14,7 @@ permissions:
 jobs:
   validate-checkstyle:
     runs-on: ubuntu-latest
-    continue-on-error: true       # ← even if the step fails, this job won’t block others
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
