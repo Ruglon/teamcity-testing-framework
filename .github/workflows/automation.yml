@@ -8,10 +8,8 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
-
 jobs:
+  # Optional: run checkstyle but never block tests while we stabilize
   validate-checkstyle:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -25,68 +23,168 @@ jobs:
       - name: Choose Maven (wrapper or system)
         run: |
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true; chmod +x mvnw || true; echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+            sed -i 's/\r$//' mvnw || true
+            chmod +x mvnw || true
+            echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
           else
-            sudo apt-get update && sudo apt-get install -y maven; echo "MVN_CMD=mvn" >> $GITHUB_ENV
+            sudo apt-get update && sudo apt-get install -y maven
+            echo "MVN_CMD=mvn" >> $GITHUB_ENV
           fi
-      - name: Run Checkstyle (do not fail CI)
-        # failOnViolation=false makes the step exit 0; job-level continue-on-error is a second safety net
-        run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
-      - name: Upload Checkstyle report
+      - name: Checkstyle (do not fail job)
+        run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.failOnViolation=false -Dcheckstyle.consoleOutput=true validate || true
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: checkstyle-report-${{ github.run_attempt }}
-          path: |
-            **/target/checkstyle-result.xml
-            **/target/checkstyle-cachefile
+          path: "**/target/checkstyle-result.xml"
           if-no-files-found: ignore
-          overwrite: true
 
   run-tests:
-    needs: validate-checkstyle
+    needs: [validate-checkstyle]   # run after, but never blocked by it
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: zulu
           java-version: '21'
           cache: maven
 
-      # Start ONLY TeamCity + finish first-start (your composite)
-      - name: TeamCity Setup
-        id: setup
-        uses: ./.github/actions/teamcity-setup
+      - name: Ensure Maven
+        run: |
+          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
+            sed -i 's/\r$//' mvnw || true
+            chmod +x mvnw || true
+            echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+          else
+            sudo apt-get update && sudo apt-get install -y maven
+            echo "MVN_CMD=mvn" >> $GITHUB_ENV
+          fi
+          ${{ env.MVN_CMD }} -v
+          java -version
 
-      # Start Selenoid in this job
+      - name: Create shared docker network
+        run: |
+          docker network inspect tcnet >/dev/null 2>&1 || docker network create tcnet
+
+      - name: Start TeamCity (official, amd64)
+        run: |
+          docker run -d --rm \
+            --name teamcity \
+            --platform=linux/amd64 \
+            --network tcnet \
+            -p 8111:8111 \
+            jetbrains/teamcity-server:2025.07.1
+          echo "TEAMCITY_URL=http://localhost:8111" >> $GITHUB_ENV
+          echo "BASE_URL=http://teamcity:8111" >> $GITHUB_ENV
+
+      - name: Wait for TeamCity /healthy
+        run: |
+          for i in {1..600}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/healthCheck/healthy" || true)
+            [ "$code" = "200" ] && { echo "Healthy (200)"; break; }
+            if (( i % 20 == 0 )); then
+              echo "--- docker ps ---"; docker ps
+              echo "--- last server logs ---"; docker logs --tail 80 teamcity || true
+            fi
+            echo "Waiting healthy ($code) ..."; sleep 2
+          done
+
+      - name: Force super login page (prints token to server log)
+        run: |
+          # This GET makes TeamCity print the Super User token again to logs. (JetBrains doc)
+          # https://www.jetbrains.com/help/teamcity/super-user.html
+          for i in {1..120}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/login.html?super=1" || true)
+            [[ "$code" =~ ^(200|302|401)$ ]] && { echo "Super page reached ($code)"; break; }
+            echo "Waiting super login page..."; sleep 2
+          done
+
+      - name: Extract Super User token
+        id: token
+        run: |
+          # Try multiple patterns with/without quotes
+          extract() {
+            docker logs teamcity 2>&1 | \
+              sed -nE 's/.*[Ss]uper user authentication token: *"?([0-9]+)"?.*/\1/p' | tail -n1
+          }
+          for i in {1..180}; do
+            T=$(extract || true)
+            [ -n "$T" ] && break
+            sleep 2
+          done
+          if [ -z "$T" ]; then
+            echo "Token not found. Dumping hints:"
+            docker logs --tail 200 teamcity || true
+            exit 1
+          fi
+          echo "SUPER_USER_TOKEN=$T" >> $GITHUB_ENV
+          echo "token=$T" >> $GITHUB_OUTPUT
+          # Complete first-run in headless mode (safe if already done)
+          curl -fsS -X POST "$TEAMCITY_URL/mnt/do/authenticate?token=$T" || true
+
+      - name: Wait for TeamCity /ready
+        run: |
+          for i in {1..600}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/healthCheck/ready" || true)
+            [ "$code" = "200" ] && { echo "Ready (200)"; break; }
+            echo "Waiting ready ($code) ..."; sleep 2
+          done
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/healthCheck/ready" || true)
+          [ "$code" = "200" ] || { echo "::error::TeamCity never became ready"; docker logs --tail 200 teamcity || true; exit 1; }
+
+      # Start Selenoid and place its browser containers on the SAME network (tcnet)
       - name: Start Selenoid
         uses: Xotabu4/selenoid-github-action@v2
+        with:
+          selenoid-start-arguments: |
+            --browsers 'chrome;firefox' --last-versions 1
+            --args "-container-network tcnet"
 
-      # Run UI tests against Selenoid
-      - name: Run UI tests (remote to Selenoid)
+      - name: Wait Selenoid status
         run: |
-          # use wrapper if present, else system maven
-          if [ -f mvnw ]; then MVN=./mvnw; else MVN=mvn; fi
-          $MVN -B \
-            -Dcheckstyle.skip=true \
-            -Dselenide.remote=http://localhost:4444/wd/hub \
-            -Dselenide.browser=chrome \
-            -Dselenide.headless=true \
-            -Dselenide.baseUrl=http://host.docker.internal:8111 \
+          for i in {1..120}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4444/status || true)
+            [ "$code" = "200" ] && { echo "Selenoid ready"; break; }
+            echo "Waiting Selenoid ($code) ..."; sleep 2
+          done
+
+      - name: Run tests
+        env:
+          TEAMCITY_URL: ${{ env.TEAMCITY_URL }}                # host URL for API tests
+          SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
+          BASE_URL: ${{ env.BASE_URL }}                        # inside-browser URL (same docker network)
+        run: |
+          ${{ env.MVN_CMD }} -B \
+            -Dtc.url="${TEAMCITY_URL}" \
+            -Dtc.super="${SUPER_USER_TOKEN}" \
+            -Dselenide.remote="http://localhost:4444/wd/hub" \
+            -Dselenide.browser=chrome -Dselenide.headless=true \
+            -DbaseUrl="${BASE_URL}" \
             -Dgroups=Regression \
-            -Dtest="teamcity.ui.**" \
+            -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
             test
 
-      - name: Upload test reports
+      - name: Always collect logs
+        if: always()
+        run: |
+          mkdir -p ci-logs
+          docker logs teamcity > ci-logs/teamcity.log 2>&1 || true
+          curl -s http://localhost:4444/status > ci-logs/selenoid-status.json 2>/dev/null || true
+          docker ps -a > ci-logs/docker-ps.txt || true
+        shell: bash
+
+      - name: Upload logs & reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports-${{ inputs.package }}-${{ github.run_attempt }}
+          name: run-tests-artifacts-${{ inputs.package }}-${{ github.run_attempt }}
           path: |
+            ci-logs/**
             **/target/surefire-reports/**
             **/target/failsafe-reports/**
           if-no-files-found: ignore
-
