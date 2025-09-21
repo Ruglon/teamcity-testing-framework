@@ -3,7 +3,7 @@
     "default": "128,0",
     "versions": {
       "latest": {
-        "image": "selenoid/chrome:128.0",
+        "image": "selenoid",
         "port": "4444",
         "path": "/"
       }
@@ -13,7 +13,7 @@
     "default": "latest",
     "versions": {
       "latest": {
-        "image": "selenoid/firefox:110.0",
+        "image": "selenoid",
         "port": "4444",
         "path": "/wd/hub"
       }
@@ -23,7 +23,7 @@
     "default": "106.0",
     "versions": {
       "106.0": {
-        "image": "selenoid/vnc_opera:106.0",
+        "image": "selenoid",
         "port": "4444",
         "path": "/"
       }
