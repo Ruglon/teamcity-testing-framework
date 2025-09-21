@@ -1,188 +1,101 @@
-name: Run tests
-
+name: automation
 on:
   workflow_call:
     inputs:
       package:
-        description: api | ui
+        description: "api | ui"
         required: true
         type: string
 
+permissions:
+  contents: write   # needed to publish Allure to gh-pages
+
 jobs:
-  # Optional: run checkstyle but never block tests while we stabilize
-  validate-checkstyle:
+  run-tests:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 60
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: zulu
-          java-version: '21'
+          java-version: "21"
           cache: maven
+
       - name: Choose Maven (wrapper or system)
         run: |
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
             sed -i 's/\r$//' mvnw || true
             chmod +x mvnw || true
-            echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+            MVN_CMD=./mvnw
           else
             sudo apt-get update && sudo apt-get install -y maven
-            echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
+            MVN_CMD=mvn
           fi
-
-      - name: Show versions
-        run: |
-          $MVN_CMD -v        # ← use runtime env var, not ${{ env... }}
-          java -version
-  
-
-  run-tests:
-    needs: [validate-checkstyle]   # run after, but never blocked by it
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '21'
-          cache: maven
-
-      - name: Ensure Maven
-        run: |
-          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true
-            chmod +x mvnw || true
-            echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
-          else
-            sudo apt-get update && sudo apt-get install -y maven
-            echo "MVN_CMD=mvn" >> $GITHUB_ENV
-          fi
-          ${{ env.MVN_CMD }} -v
+          echo "MVN_CMD=$MVN_CMD" >> "$GITHUB_ENV"
+          $MVN_CMD -v
           java -version
 
-      - name: Create shared docker network
-        run: |
-          docker network inspect tcnet >/dev/null 2>&1 || docker network create tcnet
+      # Lesson 4: your composite action spins up TeamCity (+ first-run), Selenoid, and writes config.properties
+      - name: TeamCity Setup
+        id: setup
+        uses: ./.github/actions/teamcity-setup
 
-      - name: Start TeamCity (official, amd64)
-        run: |
-          docker run -d --rm \
-            --name teamcity \
-            --platform=linux/amd64 \
-            --network tcnet \
-            -p 8111:8111 \
-            jetbrains/teamcity-server:2025.07.1
-          echo "TEAMCITY_URL=http://localhost:8111" >> $GITHUB_ENV
-          echo "BASE_URL=http://teamcity:8111" >> $GITHUB_ENV
-
-      - name: Wait for TeamCity /healthy
-        run: |
-          for i in {1..600}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/healthCheck/healthy" || true)
-            [ "$code" = "200" ] && { echo "Healthy (200)"; break; }
-            if (( i % 20 == 0 )); then
-              echo "--- docker ps ---"; docker ps
-              echo "--- last server logs ---"; docker logs --tail 80 teamcity || true
-            fi
-            echo "Waiting healthy ($code) ..."; sleep 2
-          done
-
-      - name: Force super login page (prints token to server log)
-        run: |
-          # This GET makes TeamCity print the Super User token again to logs. (JetBrains doc)
-          # https://www.jetbrains.com/help/teamcity/super-user.html
-          for i in {1..120}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/login.html?super=1" || true)
-            [[ "$code" =~ ^(200|302|401)$ ]] && { echo "Super page reached ($code)"; break; }
-            echo "Waiting super login page..."; sleep 2
-          done
-
-      - name: Extract Super User token
-        id: token
-        run: |
-          # Try multiple patterns with/without quotes
-          extract() {
-            docker logs teamcity 2>&1 | \
-              sed -nE 's/.*[Ss]uper user authentication token: *"?([0-9]+)"?.*/\1/p' | tail -n1
-          }
-          for i in {1..180}; do
-            T=$(extract || true)
-            [ -n "$T" ] && break
-            sleep 2
-          done
-          if [ -z "$T" ]; then
-            echo "Token not found. Dumping hints:"
-            docker logs --tail 200 teamcity || true
-            exit 1
-          fi
-          echo "SUPER_USER_TOKEN=$T" >> $GITHUB_ENV
-          echo "token=$T" >> $GITHUB_OUTPUT
-          # Complete first-run in headless mode (safe if already done)
-          curl -fsS -X POST "$TEAMCITY_URL/mnt/do/authenticate?token=$T" || true
-
-      - name: Wait for TeamCity /ready
-        run: |
-          for i in {1..600}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/healthCheck/ready" || true)
-            [ "$code" = "200" ] && { echo "Ready (200)"; break; }
-            echo "Waiting ready ($code) ..."; sleep 2
-          done
-          code=$(curl -s -o /dev/null -w "%{http_code}" "$TEAMCITY_URL/healthCheck/ready" || true)
-          [ "$code" = "200" ] || { echo "::error::TeamCity never became ready"; docker logs --tail 200 teamcity || true; exit 1; }
-
-      # Start Selenoid and place its browser containers on the SAME network (tcnet)
-      - name: Start Selenoid
-        uses: Xotabu4/selenoid-github-action@v2
-        with:
-          selenoid-start-arguments: |
-            --browsers 'chrome;firefox' --last-versions 1
-            --args "-container-network tcnet"
-
-      - name: Wait Selenoid status
-        run: |
-          for i in {1..120}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4444/status || true)
-            [ "$code" = "200" ] && { echo "Selenoid ready"; break; }
-            echo "Waiting Selenoid ($code) ..."; sleep 2
-          done
-
+      # Run TestNG tests.
+      # package input selects api/ui tests by class name pattern (simple and lesson-like).
       - name: Run tests
-        env:
-          TEAMCITY_URL: ${{ env.TEAMCITY_URL }}                # host URL for API tests
-          SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
-          BASE_URL: ${{ env.BASE_URL }}                        # inside-browser URL (same docker network)
         run: |
           $MVN_CMD -B \
-            -Dtc.url="${TEAMCITY_URL}" \
-            -Dtc.super="${SUPER_USER_TOKEN}" \
-            -Dselenide.remote="http://localhost:4444/wd/hub" \
-            -Dselenide.browser=chrome -Dselenide.headless=true \
-            -DbaseUrl="${BASE_URL}" \
             -Dgroups=Regression \
             -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
             test
 
-      - name: Always collect logs
-        if: always()
+      # Lesson 5 (optional): Swagger API coverage when running 'api'
+      - name: Swagger coverage (api only)
+        if: ${{ inputs.package == 'api' }}
+        continue-on-error: true
         run: |
-          mkdir -p ci-logs
-          docker logs teamcity > ci-logs/teamcity.log 2>&1 || true
-          curl -s http://localhost:4444/status > ci-logs/selenoid-status.json 2>/dev/null || true
-          docker ps -a > ci-logs/docker-ps.txt || true
-        shell: bash
+          TOKEN="$(grep -E '^superUserToken=' src/main/resources/config.properties | cut -d= -f2)"
+          ./.swagger-coverage-commandline/bin/swagger-coverage-commandline \
+            -s "http://localhost:8111/app/rest/swagger.json?superuser=${TOKEN}" \
+            -i target/swagger-coverage-output
 
-      - name: Upload logs & reports
-        if: always()
+      - name: Upload Swagger coverage
+        if: ${{ inputs.package == 'api' }}
         uses: actions/upload-artifact@v4
         with:
-          name: run-tests-artifacts-${{ inputs.package }}-${{ github.run_attempt }}
+          name: swagger-coverage
           path: |
-            ci-logs/**
-            **/target/surefire-reports/**
-            **/target/failsafe-reports/**
+            swagger-coverage-report.html
+            swagger-coverage-results.json
           if-no-files-found: ignore
+
+      # Lesson 6: Publish Allure with history to gh-pages (kept compact)
+      - name: Load previous report history
+        if: always()
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Build Allure report
+        if: always()
+        uses: simple-elf/allure-report-action@v1.7
+        with:
+          gh_pages: gh-pages
+          allure_history: allure-history
+          allure_results: target/allure-results
+          subfolder: ${{ inputs.package }}
+
+      - name: Publish Allure to gh-pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
