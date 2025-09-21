@@ -17,7 +17,7 @@ import static org.awaitility.Awaitility.await;
 import static teamcity.api.enums.Endpoint.*;
 import static teamcity.api.generators.TestDataGenerator.generate;
 
-@Test(groups = {"Regression"})
+@Test(groups = {"API", "Regression"})
 public class ProjectTest extends BaseApiTest {
 
     @Test(description = "User should be able to create project", groups = {"Positive", "Project"})

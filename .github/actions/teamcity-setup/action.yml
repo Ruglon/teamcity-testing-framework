@@ -32,23 +32,13 @@ runs:
         sudo apt-get update -y
         sudo apt-get install -y jq
 
-    - name: Choose Maven (wrapper or system)
+    - name: Setup Maven Wrapper
       shell: bash
       run: |
-        set -e
-        if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-          sed -i 's/\r$//' mvnw || true
-          chmod +x mvnw || true
-          MVN_CMD=./mvnw            # set shell var for THIS step
-        else
-          echo "Maven Wrapper missing/incomplete. Installing Maven..."
-          sudo apt-get update -y
-          sudo apt-get install -y maven
-          MVN_CMD=mvn               # set shell var for THIS step
-        fi
-        echo "MVN_CMD=$MVN_CMD" >> "$GITHUB_ENV"   # for NEXT steps
-        echo "Using Maven: $MVN_CMD"
-        "$MVN_CMD" -v
+        chmod +x mvnw
+        echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
+        echo "Using Maven: ./mvnw"
+        ./mvnw -v
         java -version
     
 
@@ -121,9 +111,12 @@ runs:
         # Adjust the selector if your class/package is different:
         "${MVN_CMD}" -B \
           -Dcheckstyle.skip=true \
-          -Dselenium.remote="http://localhost:4444/wd/hub" \
-          -DbaseUrl="http://teamcity:8111" \
-          -Dtest='SetupServerTest#setupTeamCityServerTest' \
+          -Dselenide.remote="http://localhost:4444/wd/hub" \
+          -Dselenide.browser="chrome" \
+          -Dselenide.baseUrl="http://teamcity:8111" \
+          -Dselenide.browserSize="1920x1080" \
+          -Dselenide.headless="true" \
+          -Dtest='teamcity.ui.SetupServerTest#setupTeamCityServerTest' \
           test
 
     - name: Force super-login page (token emission)

@@ -5,7 +5,7 @@ import teamcity.ui.setup.FirstStartPage;
 
 public class SetupServerTest extends BaseUiTest{
 
-    @Test(groups = {"Setup"})
+    @Test(groups = {"UI", "Setup"})
     public void setupTeamCityServerTest(){
         FirstStartPage.open().setupFirstStart();
     }

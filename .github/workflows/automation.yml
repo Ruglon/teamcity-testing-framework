@@ -22,15 +22,11 @@ jobs:
           distribution: zulu
           java-version: '21'
           cache: maven
-      - name: Choose Maven (wrapper or system)
+      - name: Setup Maven Wrapper
         run: |
-          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true; chmod +x mvnw || true; echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
-          else
-            sudo apt-get update && sudo apt-get install -y maven; echo "MVN_CMD=mvn" >> $GITHUB_ENV
-          fi
+          chmod +x mvnw
+          echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
       - name: Run Checkstyle (do not fail CI)
-        # failOnViolation=false makes the step exit 0; job-level continue-on-error is a second safety net
         run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
       - name: Upload Checkstyle report
         if: always()
@@ -56,27 +52,34 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # Start ONLY TeamCity + finish first-start (your composite)
+      - name: Setup Maven Wrapper
+        run: |
+          chmod +x mvnw
+          echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+
+      # Start TeamCity + Selenoid + finish first-start
       - name: TeamCity Setup
         id: setup
         uses: ./.github/actions/teamcity-setup
 
-      # Start Selenoid in this job
-      - name: Start Selenoid
-        uses: Xotabu4/selenoid-github-action@v2
-
-      # Run UI tests against Selenoid
-      - name: Run UI tests (remote to Selenoid)
+      # Run tests based on package type
+      - name: Run API tests
+        if: ${{ inputs.package == 'api' }}
         run: |
-          # use wrapper if present, else system maven
-          if [ -f mvnw ]; then MVN=./mvnw; else MVN=mvn; fi
-          $MVN -B \
+          ${{ env.MVN_CMD }} -B \
+            -Dcheckstyle.skip=true \
+            -Dtest="teamcity.api.**" \
+            test
+
+      - name: Run UI tests
+        if: ${{ inputs.package == 'ui' }}
+        run: |
+          ${{ env.MVN_CMD }} -B \
             -Dcheckstyle.skip=true \
             -Dselenide.remote=http://localhost:4444/wd/hub \
             -Dselenide.browser=chrome \
             -Dselenide.headless=true \
             -Dselenide.baseUrl=http://host.docker.internal:8111 \
-            -Dgroups=Regression \
             -Dtest="teamcity.ui.**" \
             test
 
@@ -88,5 +91,6 @@ jobs:
           path: |
             **/target/surefire-reports/**
             **/target/failsafe-reports/**
+            **/allure-results/**
           if-no-files-found: ignore
 

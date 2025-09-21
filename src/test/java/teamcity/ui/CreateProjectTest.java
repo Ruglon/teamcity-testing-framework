@@ -19,7 +19,7 @@ import teamcity.ui.pages.admin.CreateProjectPage;
 import static io.qameta.allure.Allure.step;
 import static teamcity.api.enums.Endpoint.BUILD_TYPES;
 
-@Test(groups = {"Regression"})
+@Test(groups = {"UI", "Regression"})
 public class CreateProjectTest extends BaseUiTest {
     private static final String REPO_URL = "https://github.com/Ruglon/teamcity-testing-framework";
 

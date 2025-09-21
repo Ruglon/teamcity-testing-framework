@@ -34,6 +34,10 @@ public class Config {
     }
 
     public static String getProperty(String key){
-        return getConfig().properties.getProperty(key);
+        String value = getConfig().properties.getProperty(key);
+        if (value == null) {
+            System.out.println("Warning: Property '" + key + "' not found in config.properties");
+        }
+        return value;
     }
 }

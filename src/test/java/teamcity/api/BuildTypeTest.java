@@ -16,7 +16,7 @@ import static teamcity.api.enums.Endpoint.*;
 import static teamcity.api.generators.TestDataGenerator.generate;
 
 
-@Test(groups = {"Regression"})
+@Test(groups = {"API", "Regression"})
 public class BuildTypeTest extends BaseApiTest{
     
         @Test(description = "User should be able to create build type", groups = {"Positive", "CRUD"})

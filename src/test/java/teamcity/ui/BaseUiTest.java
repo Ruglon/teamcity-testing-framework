@@ -18,14 +18,56 @@ public class BaseUiTest extends BaseTest {
 
     @BeforeSuite(alwaysRun = true)
     public void setupUiTest() {
-        Configuration.browser = Config.getProperty("browser");
-        Configuration.baseUrl = "http://" + Config.getProperty("host");
-        // НЕТ ПИШИТЕ UI ТЕСТЫ С ЛОКАЛЬНЫМ БРАУЗЕРОМ
-        // А ПОТОМ ЗАПУСКАЕТЕ НА REMOTE BROWSER
-        Configuration.remote = Config.getProperty("remote");
-        Configuration.browserSize = Config.getProperty("browserSize");
+        // Get browser from system properties first, then fallback to config file
+        String browser = System.getProperty("selenide.browser");
+        if (browser == null || browser.isEmpty()) {
+            browser = Config.getProperty("browser");
+        }
+        Configuration.browser = browser != null ? browser : "chrome";
+        
+        // Get base URL from system properties first, then fallback to config file
+        String baseUrl = System.getProperty("selenide.baseUrl");
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            String host = Config.getProperty("host");
+            baseUrl = host != null ? "http://" + host : "http://localhost:8111";
+        }
+        Configuration.baseUrl = baseUrl;
+        
+        // Get remote URL from system properties first, then fallback to config file
+        String remote = System.getProperty("selenide.remote");
+        if (remote == null || remote.isEmpty()) {
+            remote = Config.getProperty("remote");
+        }
+        Configuration.remote = remote;
+        
+        // Get browser size from system properties first, then fallback to config file
+        String browserSize = System.getProperty("selenide.browserSize");
+        if (browserSize == null || browserSize.isEmpty()) {
+            browserSize = Config.getProperty("browserSize");
+        }
+        Configuration.browserSize = browserSize != null ? browserSize : "1920x1080";
 
+        // Debug logging
+        System.out.println("Selenide Configuration:");
+        System.out.println("  Browser: " + Configuration.browser);
+        System.out.println("  Base URL: " + Configuration.baseUrl);
+        System.out.println("  Remote: " + Configuration.remote);
+        System.out.println("  Browser Size: " + Configuration.browserSize);
+
+        // Ensure browser is not null
+        if (Configuration.browser == null || Configuration.browser.isEmpty()) {
+            System.err.println("ERROR: Browser configuration is null or empty!");
+            Configuration.browser = "chrome"; // Fallback
+        }
+
+        // Set browser capabilities before any browser operations
         Configuration.browserCapabilities.setCapability("selenoid:options", Map.of("enableVNC", true, "enableLog", true));
+        
+        // Set additional Chrome capabilities for better compatibility
+        if ("chrome".equals(Configuration.browser)) {
+            Configuration.browserCapabilities.setCapability("browserName", "chrome");
+            Configuration.browserCapabilities.setCapability("browserVersion", "latest");
+        }
 
         SelenideLogger.addListener("AllureSelenide", new AllureSelenide()
                 .screenshots(true)

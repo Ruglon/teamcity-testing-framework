@@ -16,7 +16,7 @@ import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static teamcity.api.enums.Endpoint.BUILD_QUEUE;
 import static teamcity.api.generators.TestDataGenerator.generate;
 
-@Feature("Start build")
+@Test(groups = {"API", "Regression"})
 public class StartBuildTest extends BaseApiTest {
     @BeforeMethod
     public void setupWireMockServer() {
