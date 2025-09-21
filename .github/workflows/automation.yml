@@ -1,44 +1,92 @@
-# Создаем репорт с покрытием API тестов, основанном на Swagger.
-# Документация: https://github.com/viclovsky/swagger-coverage
-# Обязательно добавить фильтр SwaggerCoverageRestAssured в RestAssured
-- name: Run Swagger Coverage
-  continue-on-error: true
-  if: ${{ inputs.package == 'api' }}
-  run: .swagger-coverage-commandline/bin/swagger-coverage-commandline -s http://$HOST:8111/app/rest/swagger.json -i target/swagger-coverage-output
+name: Run tests
 
-# Сохраняем Swagger Report в артефакты GitHub Actions
-- name: Save Swagger Coverage
-  uses: actions/upload-artifact@v4
-  if: ${{ inputs.package == 'api' }}
-  with:
-    name: swagger-coverage
-    path: |
-      swagger-coverage-report.html
-      swagger-coverage-results.json
-      
-      # Загружаем историю Allure Report с специальной ветки gh-pages (https://allurereport.org/docs/integrations-github/)
-- name: Load test report history
-  uses: actions/checkout@v2
-  if: always()
-  continue-on-error: true
-  with:
-    ref: gh-pages
-    path: gh-pages
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: api | ui
+        required: true
+        type: string
 
-- name: Build test report
-  uses: simple-elf/allure-report-action@v1.7
-  if: always()
-  with:
-    gh_pages: gh-pages
-    allure_history: allure-history
-    allure_results: target/allure-results
-    subfolder: ${{ inputs.package }}
+permissions:
+  contents: write
 
-# Создаем пустую ветку gh-pages на основе инструкции https://gist.github.com/ramnathv/2227408
-- name: Publish test report
-  uses: peaceiris/actions-gh-pages@v3
-  if: always()
-  with:
-    github_token: ${{ secrets.GITHUB_TOKEN }}
-    publish_branch: gh-pages
-    publish_dir: allure-history
+jobs:
+  validate-checkstyle:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '21'
+          cache: maven
+      - name: Choose Maven (wrapper or system)
+        run: |
+          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
+            sed -i 's/\r$//' mvnw || true; chmod +x mvnw || true; echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+          else
+            sudo apt-get update && sudo apt-get install -y maven; echo "MVN_CMD=mvn" >> $GITHUB_ENV
+          fi
+      - name: Run Checkstyle (do not fail CI)
+        # failOnViolation=false makes the step exit 0; job-level continue-on-error is a second safety net
+        run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
+      - name: Upload Checkstyle report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkstyle-report-${{ github.run_attempt }}
+          path: |
+            **/target/checkstyle-result.xml
+            **/target/checkstyle-cachefile
+          if-no-files-found: ignore
+          overwrite: true
+
+  run-tests:
+    needs: validate-checkstyle
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '21'
+          cache: maven
+
+      # Start ONLY TeamCity + finish first-start (your composite)
+      - name: TeamCity Setup
+        id: setup
+        uses: ./.github/actions/teamcity-setup
+
+      # Start Selenoid in this job
+      - name: Start Selenoid
+        uses: Xotabu4/selenoid-github-action@v2
+
+      # Run UI tests against Selenoid
+      - name: Run UI tests (remote to Selenoid)
+        run: |
+          # use wrapper if present, else system maven
+          if [ -f mvnw ]; then MVN=./mvnw; else MVN=mvn; fi
+          $MVN -B \
+            -Dcheckstyle.skip=true \
+            -Dselenide.remote=http://localhost:4444/wd/hub \
+            -Dselenide.browser=chrome \
+            -Dselenide.headless=true \
+            -Dselenide.baseUrl=http://host.docker.internal:8111 \
+            -Dgroups=Regression \
+            -Dtest="teamcity.ui.**" \
+            test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ inputs.package }}-${{ github.run_attempt }}
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+
