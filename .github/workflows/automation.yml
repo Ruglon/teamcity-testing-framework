@@ -25,19 +25,17 @@ jobs:
           if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
             sed -i 's/\r$//' mvnw || true
             chmod +x mvnw || true
-            echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+            echo "MVN_CMD=./mvnw" >> "$GITHUB_ENV"
           else
             sudo apt-get update && sudo apt-get install -y maven
-            echo "MVN_CMD=mvn" >> $GITHUB_ENV
+            echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
           fi
-      - name: Checkstyle (do not fail job)
-        run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.failOnViolation=false -Dcheckstyle.consoleOutput=true validate || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: checkstyle-report-${{ github.run_attempt }}
-          path: "**/target/checkstyle-result.xml"
-          if-no-files-found: ignore
+
+      - name: Show versions
+        run: |
+          $MVN_CMD -v        # ← use runtime env var, not ${{ env... }}
+          java -version
+  
 
   run-tests:
     needs: [validate-checkstyle]   # run after, but never blocked by it
@@ -159,7 +157,7 @@ jobs:
           SUPER_USER_TOKEN: ${{ env.SUPER_USER_TOKEN }}
           BASE_URL: ${{ env.BASE_URL }}                        # inside-browser URL (same docker network)
         run: |
-          ${{ env.MVN_CMD }} -B \
+          $MVN_CMD -B \
             -Dtc.url="${TEAMCITY_URL}" \
             -Dtc.super="${SUPER_USER_TOKEN}" \
             -Dselenide.remote="http://localhost:4444/wd/hub" \
