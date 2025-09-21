@@ -1,5 +1,5 @@
 name: TeamCity Setup
-description: Start Selenoid + TeamCity, finish first-start via UI, expose token and URLs
+description: Start Selenoid, run setup test against local TeamCity, expose token and URLs
 
 # Outputs exposed to the caller workflow
 outputs:
@@ -7,7 +7,7 @@ outputs:
     description: "Runner → TeamCity URL"
     value: ${{ steps.expose.outputs.teamcity_url }}
   base_url:
-    description: "Browser → TeamCity URL (Docker network)"
+    description: "Browser → TeamCity URL"
     value: ${{ steps.expose.outputs.base_url }}
   selenoid_url:
     description: "Runner → Selenoid URL"
@@ -26,34 +26,12 @@ runs:
         java-version: "21"
         cache: maven
 
-    - name: Ensure jq (used to probe Selenoid)
+    - name: Install dependencies
       shell: bash
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y jq
-
-    - name: Setup Maven
-      shell: bash
-      run: |
-        sudo apt-get update -y
-        sudo apt-get install -y maven
+        sudo apt-get install -y curl jq maven
         echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
-        echo "Using Maven: mvn"
-        mvn -v
-        java -version
-    
-
-    - name: Verify browsers.json
-      shell: bash
-      run: |
-        if [ ! -f config/browsers.json ]; then
-          echo "::error::Missing config/browsers.json (commit it per the course)"; exit 1
-        fi
-
-    - name: Create docker network
-      shell: bash
-      run: |
-        docker network inspect tcnet >/dev/null 2>&1 || docker network create tcnet
 
     - name: Start Selenoid
       shell: bash
@@ -70,12 +48,7 @@ runs:
         docker pull selenoid/chrome:128.0 || echo "Chrome image pull failed, will try during session"
         docker pull selenoid/firefox:110.0 || echo "Firefox image pull failed, will try during session"
         
-        # Verify images are available
-        echo "Available Docker images:"
-        docker images | grep selenoid || echo "No selenoid images found"
-        
         docker run -d --rm --name selenoid \
-          --network tcnet \
           -p 4444:4444 \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -v "$GITHUB_WORKSPACE/config/browsers.json:/etc/selenoid/browsers.json:ro" \
@@ -83,7 +56,6 @@ runs:
           -v /opt/selenoid/logs:/opt/selenoid/logs \
           aerokube/selenoid:latest-release \
           -listen :4444 \
-          -container-network tcnet \
           -session-attempt-timeout 3m \
           -limit 1
         for i in {1..120}; do
@@ -92,79 +64,6 @@ runs:
           fi
           echo "Waiting Selenoid..."; sleep 2
         done
-
-    - name: Start TeamCity (2023.11.1 per course)
-      shell: bash
-      run: |
-        set -e
-        mkdir -p tmp/teamcity_server/datadir tmp/teamcity_server/logs
-        docker rm -f teamcity >/dev/null 2>&1 || true
-        
-        echo "Pulling TeamCity image..."
-        docker pull nobugsme/teamcity-server:2023.11.1 || {
-          echo "Failed to pull TeamCity image, trying alternative..."
-          docker pull jetbrains/teamcity-server:2023.11.1 || {
-            echo "Failed to pull alternative TeamCity image"
-            exit 1
-          }
-          TEAMCITY_IMAGE="jetbrains/teamcity-server:2023.11.1"
-        }
-        
-        echo "Starting TeamCity container..."
-        docker run -d --rm --name teamcity \
-          --network tcnet \
-          -p 8111:8111 \
-          -v "$GITHUB_WORKSPACE/tmp/teamcity_server/datadir:/data/teamcity_server/datadir" \
-          -v "$GITHUB_WORKSPACE/tmp/teamcity_server/logs:/opt/teamcity/logs" \
-          ${TEAMCITY_IMAGE:-nobugsme/teamcity-server:2023.11.1}
-        
-        echo "Checking if TeamCity container is running..."
-        docker ps | grep teamcity || echo "TeamCity container not found in running containers"
-        
-        echo "Checking TeamCity container logs..."
-        docker logs teamcity || echo "Failed to get TeamCity logs"
-        
-        echo "Waiting for TeamCity to be healthy..."
-        for i in {1..240}; do
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
-          [ "$code" = "200" ] && { echo "TeamCity healthy=200"; break; }
-          echo "Waiting TeamCity healthy ($code)..."; sleep 2
-          
-          # Check if container is still running every 10 iterations
-          if [ $((i % 10)) -eq 0 ]; then
-            if ! docker ps | grep -q teamcity; then
-              echo "ERROR: TeamCity container stopped running!"
-              docker logs teamcity || echo "Failed to get logs"
-              exit 1
-            fi
-          fi
-        done
-
-    - name: Seed config.properties for setup test
-      shell: bash
-      run: |
-        mkdir -p src/main/resources
-        
-        # Verify TeamCity container is running
-        if ! docker ps | grep -q teamcity; then
-          echo "ERROR: TeamCity container is not running!"
-          docker ps -a | grep teamcity || echo "No TeamCity container found"
-          exit 1
-        fi
-        
-        # Get TeamCity IP for config
-        TEAMCITY_IP=$(docker inspect teamcity --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-        if [ -z "$TEAMCITY_IP" ]; then
-          echo "ERROR: Could not get TeamCity IP address!"
-          docker inspect teamcity || echo "Failed to inspect TeamCity container"
-          exit 1
-        fi
-        
-        printf '%s\n' \
-          "host=${TEAMCITY_IP}:8111" \
-          'remote=http://localhost:4444/wd/hub' \
-          > src/main/resources/config.properties
-        echo "Created config.properties with TeamCity IP: ${TEAMCITY_IP}:8111"
 
     - name: Run SetupServerTest (complete first-start wizard)
       shell: bash
@@ -178,29 +77,12 @@ runs:
         echo "Checking available browsers..."
         curl -fsS http://localhost:4444/status | jq '.browsers' || echo "Browser status check failed"
         
-        # Test network connectivity from host
-        echo "Testing TeamCity connectivity from host..."
-        curl -fsS http://localhost:8111/healthCheck/healthy || echo "TeamCity not reachable from host"
-        
-        # Test network connectivity from within Docker network
-        echo "Testing TeamCity connectivity from Docker network..."
-        docker run --rm --network tcnet curlimages/curl:latest curl -fsS http://teamcity:8111/healthCheck/healthy || echo "TeamCity not reachable from Docker network"
-        
-        # Get TeamCity container IP address
-        echo "Getting TeamCity container IP address..."
-        TEAMCITY_IP=$(docker inspect teamcity --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-        echo "TeamCity IP: $TEAMCITY_IP"
-        
-        # Test connectivity to TeamCity using IP address
-        echo "Testing TeamCity connectivity with IP address..."
-        docker run --rm --network tcnet curlimages/curl:latest curl -fsS http://${TEAMCITY_IP}:8111/healthCheck/healthy && echo "TeamCity IP works" || echo "TeamCity IP failed"
-        
-        # Adjust the selector if your class/package is different:
+        # Run the test against localhost TeamCity
         "${MVN_CMD}" -B \
           -Dcheckstyle.skip=true \
           -Dselenide.remote="http://localhost:4444/wd/hub" \
           -Dselenide.browser="chrome" \
-          -Dselenide.baseUrl="http://${TEAMCITY_IP}:8111" \
+          -Dselenide.baseUrl="http://localhost:8111" \
           -Dselenide.browserSize="1920x1080" \
           -Dselenide.headless="true" \
           -Dtest='teamcity.ui.SetupServerTest#setupTeamCityServerTest' \
@@ -211,31 +93,33 @@ runs:
       run: |
         for i in {1..120}; do
           code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8111/login.html?super=1" || true)
-          [[ "$code" =~ ^(200|302|401)$ ]] && { echo "Super login reachable ($code)"; break; }
-          echo "Waiting super-login page ($code)..."; sleep 2
+          [ "$code" = "200" ] && { echo "Super login page ready=200"; break; }
+          echo "Waiting super login page ($code)..."; sleep 2
         done
 
-    - name: Extract Super User token
+    - name: Extract super-user token
       id: token
       shell: bash
       run: |
-        set -e
-        TOKEN=$(grep -aoE 'Super user authentication token: *"?([0-9]+)"?' \
-          tmp/teamcity_server/logs/teamcity-*.log 2>/dev/null \
-          | sed -E 's/.*: *"?([0-9]+)"?/\1/' | tail -n1)
-        if [ -z "$TOKEN" ]; then
-          echo "::error::Super user token not found in logs"
-          tail -n 200 tmp/teamcity_server/logs/teamcity-server.log || true
-          exit 1
-        fi
+        TOKEN=$(curl -s "http://localhost:8111/login.html?super=1" | grep -o 'name="superUserToken" value="[^"]*"' | cut -d'"' -f4)
         echo "super_user_token=$TOKEN" >> "$GITHUB_OUTPUT"
-        echo "SUPER_USER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-        printf "\nsuperUserToken=%s\n" "$TOKEN" >> src/main/resources/config.properties
+        echo "Super-user token: $TOKEN"
 
-    - name: Expose outputs
+    - name: Seed final config.properties
+      shell: bash
+      run: |
+        mkdir -p src/main/resources
+        printf '%s\n' \
+          'host=localhost:8111' \
+          'superUserToken='"${{ steps.token.outputs.super_user_token }}" \
+          'remote=http://localhost:4444/wd/hub' \
+          > src/main/resources/config.properties
+        echo "Final config.properties created with super-user token"
+
+    - name: Expose URLs
       id: expose
       shell: bash
       run: |
         echo "teamcity_url=http://localhost:8111" >> "$GITHUB_OUTPUT"
-        echo "base_url=http://teamcity:8111" >> "$GITHUB_OUTPUT"
-        echo "selenoid_url=http://localhost:4444/wd/hub" >> "$GITHUB_OUTPUT"
+        echo "base_url=http://localhost:8111" >> "$GITHUB_OUTPUT"
+        echo "selenoid_url=http://localhost:4444" >> "$GITHUB_OUTPUT"
