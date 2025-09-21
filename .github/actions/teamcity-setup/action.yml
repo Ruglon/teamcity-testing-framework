@@ -60,6 +60,15 @@ runs:
         set -e
         docker rm -f selenoid >/dev/null 2>&1 || true
         
+        # Pull the Selenoid image first
+        echo "Pulling Selenoid image..."
+        docker pull aerokube/selenoid:latest-release
+        
+        # Pull browser images
+        echo "Pulling browser images..."
+        docker pull selenoid/chrome:128.0 || echo "Chrome image pull failed, will try during session"
+        docker pull selenoid/firefox:110.0 || echo "Firefox image pull failed, will try during session"
+        
         echo "Starting Selenoid..."
         docker run -d --rm --name selenoid \
           -p 4444:4444 \
