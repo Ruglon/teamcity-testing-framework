@@ -60,6 +60,20 @@ runs:
       run: |
         set -e
         docker rm -f selenoid >/dev/null 2>&1 || true
+        
+        # Pull the Selenoid image first
+        echo "Pulling Selenoid image..."
+        docker pull aerokube/selenoid:latest-release
+        
+        # Pull browser images
+        echo "Pulling browser images..."
+        docker pull selenoid/chrome:128.0 || echo "Chrome image pull failed, will try during session"
+        docker pull selenoid/firefox:110.0 || echo "Firefox image pull failed, will try during session"
+        
+        # Verify images are available
+        echo "Available Docker images:"
+        docker images | grep selenoid || echo "No selenoid images found"
+        
         docker run -d --rm --name selenoid \
           --network tcnet \
           -p 4444:4444 \
@@ -109,6 +123,14 @@ runs:
       shell: bash
       run: |
         set -e
+        # Debug Selenoid status
+        echo "Checking Selenoid status..."
+        curl -fsS http://localhost:4444/status | jq '.' || echo "Selenoid status check failed"
+        
+        # Debug available browsers
+        echo "Checking available browsers..."
+        curl -fsS http://localhost:4444/status | jq '.browsers' || echo "Browser status check failed"
+        
         # Adjust the selector if your class/package is different:
         "${MVN_CMD}" -B \
           -Dcheckstyle.skip=true \
