@@ -76,6 +76,7 @@ runs:
         
         docker run -d --rm --name selenoid \
           --network tcnet \
+          --add-host teamcity:host-gateway \
           -p 4444:4444 \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -v "$GITHUB_WORKSPACE/config/browsers.json:/etc/selenoid/browsers.json:ro" \
@@ -116,7 +117,7 @@ runs:
       run: |
         mkdir -p src/main/resources
         printf '%s\n' \
-          'host=host.docker.internal:8111' \
+          'host=teamcity:8111' \
           'remote=http://localhost:4444/wd/hub' \
           > src/main/resources/config.properties
 
@@ -140,12 +141,26 @@ runs:
         echo "Testing TeamCity connectivity from Docker network..."
         docker run --rm --network tcnet curlimages/curl:latest curl -fsS http://teamcity:8111/healthCheck/healthy || echo "TeamCity not reachable from Docker network"
         
+        # Get the host IP address for browser containers
+        echo "Getting host IP address..."
+        HOST_IP=$(docker run --rm --network tcnet curlimages/curl:latest nslookup host.docker.internal | grep -A1 "Name:" | tail -1 | awk '{print $2}' || echo "")
+        if [ -z "$HOST_IP" ]; then
+          # Fallback: get the gateway IP
+          HOST_IP=$(docker run --rm --network tcnet curlimages/curl:latest ip route | grep default | awk '{print $3}' | head -1)
+        fi
+        echo "Host IP: $HOST_IP"
+        
+        # Test connectivity to TeamCity using different methods
+        echo "Testing TeamCity connectivity with different hostnames..."
+        docker run --rm --network tcnet curlimages/curl:latest curl -fsS http://teamcity:8111/healthCheck/healthy && echo "teamcity:8111 works" || echo "teamcity:8111 failed"
+        docker run --rm --network tcnet curlimages/curl:latest curl -fsS http://${HOST_IP}:8111/healthCheck/healthy && echo "${HOST_IP}:8111 works" || echo "${HOST_IP}:8111 failed"
+        
         # Adjust the selector if your class/package is different:
         "${MVN_CMD}" -B \
           -Dcheckstyle.skip=true \
           -Dselenide.remote="http://localhost:4444/wd/hub" \
           -Dselenide.browser="chrome" \
-          -Dselenide.baseUrl="http://host.docker.internal:8111" \
+          -Dselenide.baseUrl="http://teamcity:8111" \
           -Dselenide.browserSize="1920x1080" \
           -Dselenide.headless="true" \
           -Dtest='teamcity.ui.SetupServerTest#setupTeamCityServerTest' \
