@@ -2,11 +2,7 @@ package teamcity.api.enums;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import teamcity.api.models.BaseModel;
-import teamcity.api.models.Build;
-import teamcity.api.models.BuildType;
-import teamcity.api.models.Project;
-import teamcity.api.models.User;
+import teamcity.api.models.*;
 
 @AllArgsConstructor
 @Getter
