@@ -1,101 +1,44 @@
-name: automation
-on:
-  workflow_call:
-    inputs:
-      package:
-        description: "api | ui"
-        required: true
-        type: string
+# Создаем репорт с покрытием API тестов, основанном на Swagger.
+# Документация: https://github.com/viclovsky/swagger-coverage
+# Обязательно добавить фильтр SwaggerCoverageRestAssured в RestAssured
+- name: Run Swagger Coverage
+  continue-on-error: true
+  if: ${{ inputs.package == 'api' }}
+  run: .swagger-coverage-commandline/bin/swagger-coverage-commandline -s http://$HOST:8111/app/rest/swagger.json -i target/swagger-coverage-output
 
-permissions:
-  contents: write   # needed to publish Allure to gh-pages
+# Сохраняем Swagger Report в артефакты GitHub Actions
+- name: Save Swagger Coverage
+  uses: actions/upload-artifact@v4
+  if: ${{ inputs.package == 'api' }}
+  with:
+    name: swagger-coverage
+    path: |
+      swagger-coverage-report.html
+      swagger-coverage-results.json
+      
+      # Загружаем историю Allure Report с специальной ветки gh-pages (https://allurereport.org/docs/integrations-github/)
+- name: Load test report history
+  uses: actions/checkout@v2
+  if: always()
+  continue-on-error: true
+  with:
+    ref: gh-pages
+    path: gh-pages
 
-jobs:
-  run-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+- name: Build test report
+  uses: simple-elf/allure-report-action@v1.7
+  if: always()
+  with:
+    gh_pages: gh-pages
+    allure_history: allure-history
+    allure_results: target/allure-results
+    subfolder: ${{ inputs.package }}
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: "21"
-          cache: maven
-
-      - name: Choose Maven (wrapper or system)
-        run: |
-          if [ -f mvnw ] && [ -f .mvn/wrapper/maven-wrapper.jar ] && [ -f .mvn/wrapper/maven-wrapper.properties ]; then
-            sed -i 's/\r$//' mvnw || true
-            chmod +x mvnw || true
-            MVN_CMD=./mvnw
-          else
-            sudo apt-get update && sudo apt-get install -y maven
-            MVN_CMD=mvn
-          fi
-          echo "MVN_CMD=$MVN_CMD" >> "$GITHUB_ENV"
-          $MVN_CMD -v
-          java -version
-
-      # Lesson 4: your composite action spins up TeamCity (+ first-run), Selenoid, and writes config.properties
-      - name: TeamCity Setup
-        id: setup
-        uses: ./.github/actions/teamcity-setup
-
-      # Run TestNG tests.
-      # package input selects api/ui tests by class name pattern (simple and lesson-like).
-      - name: Run tests
-        run: |
-          $MVN_CMD -B \
-            -Dgroups=Regression \
-            -Dtest="com.example.teamcity.${{ inputs.package }}.**" \
-            test
-
-      # Lesson 5 (optional): Swagger API coverage when running 'api'
-      - name: Swagger coverage (api only)
-        if: ${{ inputs.package == 'api' }}
-        continue-on-error: true
-        run: |
-          TOKEN="$(grep -E '^superUserToken=' src/main/resources/config.properties | cut -d= -f2)"
-          ./.swagger-coverage-commandline/bin/swagger-coverage-commandline \
-            -s "http://localhost:8111/app/rest/swagger.json?superuser=${TOKEN}" \
-            -i target/swagger-coverage-output
-
-      - name: Upload Swagger coverage
-        if: ${{ inputs.package == 'api' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: swagger-coverage
-          path: |
-            swagger-coverage-report.html
-            swagger-coverage-results.json
-          if-no-files-found: ignore
-
-      # Lesson 6: Publish Allure with history to gh-pages (kept compact)
-      - name: Load previous report history
-        if: always()
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: gh-pages
-
-      - name: Build Allure report
-        if: always()
-        uses: simple-elf/allure-report-action@v1.7
-        with:
-          gh_pages: gh-pages
-          allure_history: allure-history
-          allure_results: target/allure-results
-          subfolder: ${{ inputs.package }}
-
-      - name: Publish Allure to gh-pages
-        if: always()
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: allure-history
+# Создаем пустую ветку gh-pages на основе инструкции https://gist.github.com/ramnathv/2227408
+- name: Publish test report
+  uses: peaceiris/actions-gh-pages@v3
+  if: always()
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    publish_branch: gh-pages
+    publish_dir: allure-history
