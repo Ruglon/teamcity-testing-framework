@@ -99,24 +99,67 @@ runs:
         set -e
         mkdir -p tmp/teamcity_server/datadir tmp/teamcity_server/logs
         docker rm -f teamcity >/dev/null 2>&1 || true
+        
+        echo "Pulling TeamCity image..."
+        docker pull nobugsme/teamcity-server:2023.11.1 || {
+          echo "Failed to pull TeamCity image, trying alternative..."
+          docker pull jetbrains/teamcity-server:2023.11.1 || {
+            echo "Failed to pull alternative TeamCity image"
+            exit 1
+          }
+          TEAMCITY_IMAGE="jetbrains/teamcity-server:2023.11.1"
+        }
+        
+        echo "Starting TeamCity container..."
         docker run -d --rm --name teamcity \
           --network tcnet \
           -p 8111:8111 \
           -v "$GITHUB_WORKSPACE/tmp/teamcity_server/datadir:/data/teamcity_server/datadir" \
           -v "$GITHUB_WORKSPACE/tmp/teamcity_server/logs:/opt/teamcity/logs" \
-          nobugsme/teamcity-server:2023.11.1
+          ${TEAMCITY_IMAGE:-nobugsme/teamcity-server:2023.11.1}
+        
+        echo "Checking if TeamCity container is running..."
+        docker ps | grep teamcity || echo "TeamCity container not found in running containers"
+        
+        echo "Checking TeamCity container logs..."
+        docker logs teamcity || echo "Failed to get TeamCity logs"
+        
+        echo "Waiting for TeamCity to be healthy..."
         for i in {1..240}; do
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
           [ "$code" = "200" ] && { echo "TeamCity healthy=200"; break; }
           echo "Waiting TeamCity healthy ($code)..."; sleep 2
+          
+          # Check if container is still running every 10 iterations
+          if [ $((i % 10)) -eq 0 ]; then
+            if ! docker ps | grep -q teamcity; then
+              echo "ERROR: TeamCity container stopped running!"
+              docker logs teamcity || echo "Failed to get logs"
+              exit 1
+            fi
+          fi
         done
 
     - name: Seed config.properties for setup test
       shell: bash
       run: |
         mkdir -p src/main/resources
+        
+        # Verify TeamCity container is running
+        if ! docker ps | grep -q teamcity; then
+          echo "ERROR: TeamCity container is not running!"
+          docker ps -a | grep teamcity || echo "No TeamCity container found"
+          exit 1
+        fi
+        
         # Get TeamCity IP for config
         TEAMCITY_IP=$(docker inspect teamcity --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+        if [ -z "$TEAMCITY_IP" ]; then
+          echo "ERROR: Could not get TeamCity IP address!"
+          docker inspect teamcity || echo "Failed to inspect TeamCity container"
+          exit 1
+        fi
+        
         printf '%s\n' \
           "host=${TEAMCITY_IP}:8111" \
           'remote=http://localhost:4444/wd/hub' \
