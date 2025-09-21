@@ -22,10 +22,10 @@ jobs:
           distribution: zulu
           java-version: '21'
           cache: maven
-      - name: Setup Maven Wrapper
+      - name: Setup Maven
         run: |
-          chmod +x mvnw
-          echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+          sudo apt-get update && sudo apt-get install -y maven
+          echo "MVN_CMD=mvn" >> $GITHUB_ENV
       - name: Run Checkstyle (do not fail CI)
         run: ${{ env.MVN_CMD }} -B -DskipTests -Dcheckstyle.consoleOutput=true -Dcheckstyle.failOnViolation=false validate
       - name: Upload Checkstyle report
@@ -52,10 +52,10 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Setup Maven Wrapper
+      - name: Setup Maven
         run: |
-          chmod +x mvnw
-          echo "MVN_CMD=./mvnw" >> $GITHUB_ENV
+          sudo apt-get update && sudo apt-get install -y maven
+          echo "MVN_CMD=mvn" >> $GITHUB_ENV
 
       # Start TeamCity + Selenoid + finish first-start
       - name: TeamCity Setup
