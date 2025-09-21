@@ -33,21 +33,34 @@ runs:
         sudo apt-get install -y curl jq maven
         echo "MVN_CMD=mvn" >> "$GITHUB_ENV"
 
+    - name: Start TeamCity Server
+      shell: bash
+      run: |
+        set -e
+        mkdir -p tmp/teamcity_server/datadir tmp/teamcity_server/logs
+        docker rm -f teamcity >/dev/null 2>&1 || true
+        
+        echo "Starting TeamCity server..."
+        docker run -d --rm --name teamcity \
+          -p 8111:8111 \
+          -v "$GITHUB_WORKSPACE/tmp/teamcity_server/datadir:/data/teamcity_server/datadir" \
+          -v "$GITHUB_WORKSPACE/tmp/teamcity_server/logs:/opt/teamcity/logs" \
+          jetbrains/teamcity-server:2023.11.1
+        
+        echo "Waiting for TeamCity to be ready..."
+        for i in {1..240}; do
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8111/healthCheck/healthy || true)
+          [ "$code" = "200" ] && { echo "TeamCity ready"; break; }
+          echo "Waiting TeamCity ($code)..."; sleep 2
+        done
+
     - name: Start Selenoid
       shell: bash
       run: |
         set -e
         docker rm -f selenoid >/dev/null 2>&1 || true
         
-        # Pull the Selenoid image first
-        echo "Pulling Selenoid image..."
-        docker pull aerokube/selenoid:latest-release
-        
-        # Pull browser images
-        echo "Pulling browser images..."
-        docker pull selenoid/chrome:128.0 || echo "Chrome image pull failed, will try during session"
-        docker pull selenoid/firefox:110.0 || echo "Firefox image pull failed, will try during session"
-        
+        echo "Starting Selenoid..."
         docker run -d --rm --name selenoid \
           -p 4444:4444 \
           -v /var/run/docker.sock:/var/run/docker.sock \
